@@ -130,6 +130,7 @@ on:
           - orangepi-5-ultra
           - orangepi-5b
           - orangepi-zero3
+          - p3-wxy4
           - painet-p3
           - painet-p5
           - panther-x2
@@ -486,7 +487,7 @@ jobs:
           gh_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Rebuild Armbian for target boards
-        uses: ophub/amlogic-s9xxx-armbian@main
+        uses: ./
         if: ${{ steps.clean.outputs.status == 'success' && !cancelled() }}
         with:
           build_target: armbian
