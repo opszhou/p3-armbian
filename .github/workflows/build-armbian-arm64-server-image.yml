@@ -130,6 +130,7 @@ on:
           - orangepi-5-ultra
           - orangepi-5b
           - orangepi-zero3
+          - p3-wxy4
           - painet-p3
           - painet-p5
           - panther-x2
@@ -433,7 +434,8 @@ jobs:
           df -hT ${PWD}
           git clone -q --single-branch --depth=1 --branch=main https://github.com/armbian/build.git build
           ln -sf /builder/build ${{ github.workspace }}/build
-          ln -sf /builder/build /home/runner/work/_actions/ophub/amlogic-s9xxx-armbian/main/build
+          # Local composite action (uses: ./) resolves github.action_path to the workspace,
+          # so the link above is sufficient; no upstream action path is used.
           echo "status=success" >> ${GITHUB_OUTPUT}
 
       - name: Compile Armbian [ ${{ matrix.release }} ]
@@ -486,7 +488,7 @@ jobs:
           gh_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Rebuild Armbian for target boards
-        uses: ophub/amlogic-s9xxx-armbian@main
+        uses: ./
         if: ${{ steps.clean.outputs.status == 'success' && !cancelled() }}
         with:
           build_target: armbian

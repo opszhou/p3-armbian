@@ -1,0 +1,142 @@
+#==========================================================================
+# Description: Sync this fork with upstream ophub/amlogic-s9xxx-armbian,
+#              then trigger the p3-wxy4 image build when upstream moved.
+#              (opszhou/p3-armbian)
+#
+# Strategy:
+#   1. Merge upstream/main with `-X ours`: on conflicting hunks OUR side
+#      wins, non-conflicting upstream changes flow in. This protects the
+#      fork-specific edits (P3-WXY4 board registration, DTB, U-Boot blobs,
+#      workflow pointing at this fork) while pulling everything else.
+#   2. Guard step: if the merge ever swallows a P3 asset, restore it from
+#      the pre-merge commit.
+#   3. Push, then dispatch build-armbian-arm64-server-image.yml with
+#      explicit inputs (noble / p3-wxy4). NOTE: repository_dispatch is NOT
+#      used because inputs.* are empty there and the matrix would build
+#      all 4 releases.
+#
+# Manual run: Actions -> "Sync upstream and build p3-wxy4" -> Run workflow.
+# To change the auto-build profile, edit the inputs in the last step
+# (set_release / armbian_board / armbian_kernel).
+#==========================================================================
+
+name: Sync upstream and build p3-wxy4
+
+on:
+  schedule:
+    - cron: "30 21 * * 6" # weekly: Sat 21:30 UTC = Sun 05:30 CST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    if: ${{ github.repository == 'opszhou/p3-armbian' }}
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/ophub/amlogic-s9xxx-armbian.git
+          git fetch upstream main
+
+      - name: Merge upstream/main (conflicts keep ours)
+        id: merge
+        env:
+          DEFAULT_BRANCH: main
+        run: |
+          BASE="$(git rev-parse HEAD)"
+          echo "premerge_sha=${BASE}" >> "${GITHUB_ENV}"
+
+          if ! git merge --no-edit -X ours upstream/main; then
+            echo "::warning::Merge produced conflicts -X ours cannot resolve; keeping ours for conflicted paths."
+            for f in $(git diff --name-only --diff-filter=U); do
+              if git cat-file -e "HEAD:${f}" 2>/dev/null; then
+                git checkout --ours -- "${f}" && git add "${f}" || true
+              else
+                git rm -f "${f}" || true
+              fi
+            done
+            git commit --no-edit || { git merge --abort; exit 1; }
+          fi
+
+          if [[ "$(git rev-parse HEAD)" == "${BASE}" ]]; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            echo "Upstream had no new commits. Nothing to do."
+            exit 0
+          fi
+          echo "Merged upstream -> $(git rev-parse HEAD)"
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Guard - P3 assets must survive the merge
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          PREV="${{ env.premerge_sha }}"
+          DB="build-armbian/armbian-files/common-files/etc/model_database.conf"
+          DTB="build-armbian/armbian-files/platform-files/rockchip/bootfs/dtb/rockchip/rk3566-p3-wxy4.dtb"
+          UBL_A="build-armbian/u-boot/rockchip/p3-wxy4/idbloader.img"
+          UBL_B="build-armbian/u-boot/rockchip/p3-wxy4/u-boot.itb"
+          WF=".github/workflows/build-armbian-arm64-server-image.yml"
+          restored=0
+
+          # restore whole file from pre-merge commit if missing
+          for f in "${DTB}" "${UBL_A}" "${UBL_B}"; do
+            if ! git cat-file -e "HEAD:${f}" 2>/dev/null; then
+              echo "::warning::${f} lost in merge - restoring from ${PREV}"
+              git checkout "${PREV}" -- "${f}" && restored=1
+            fi
+          done
+
+          # restore board registration line if upstream dropped it
+          if ! grep -q ':p3-wxy4 ' "${DB}"; then
+            echo "::warning::p3-wxy4 row lost from model_database.conf - restoring from ${PREV}"
+            git show "${PREV}:${DB}" | grep ':p3-wxy4 ' >> "${DB}" && restored=1
+          fi
+
+          # restore workflow board option if upstream dropped it
+          if ! grep -q 'p3-wxy4' "${WF}"; then
+            echo "::warning::p3-wxy4 option lost from build workflow - restoring from ${PREV}"
+            git checkout "${PREV}" -- "${WF}" && restored=1
+          fi
+
+          if [[ "${restored}" == "1" ]]; then
+            git add -A
+            git commit --amend --no-edit
+            echo "P3 assets restored and merge commit amended."
+          else
+            echo "All P3 assets intact after merge."
+          fi
+          grep ':p3-wxy4 ' "${DB}"
+
+      - name: Push
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          git push origin HEAD:main
+
+      - name: Trigger p3-wxy4 image build
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run build-armbian-arm64-server-image.yml \
+            --ref main \
+            -f set_release=noble \
+            -f armbian_board=p3-wxy4 \
+            -f armbian_kernel=6.12.y_6.18.y
+          echo "Build dispatched: noble / p3-wxy4 / 6.12.y_6.18.y"
