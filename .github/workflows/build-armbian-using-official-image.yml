@@ -431,7 +431,7 @@ jobs:
 
           mkdir -p /builder/build
           ln -sf /builder/build ${{ github.workspace }}/build
-          ln -sf /builder/build /home/runner/work/_actions/ophub/amlogic-s9xxx-armbian/main/build
+          # Local composite action resolves action_path to the workspace; the extra link is sufficient.
 
           sudo timedatectl set-timezone "${TZ}"
           echo "build_tag=Armbian${set_release}_arm64_${{ inputs.armbian_edition }}_$(date +"%Y.%m")" >> ${GITHUB_ENV}
