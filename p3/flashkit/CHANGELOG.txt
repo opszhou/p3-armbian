@@ -80,3 +80,5 @@ using the same force-by-address procedure. The v2 bootarea expansion did not mov
 partition, so reverting the boot layer does not affect BOOT/rootfs.
 BootROM Maskrom (short eMMC CLK + power) remains the ultimate rescue,
 independent of everything above.
+
+v2.1: 01_gpt_bootarea.img rebuilt - u-boot.itb L9a (rockusb 0x0C GET_VERSION reply, Loader Ver fix in RKDevTool). 02_boot.img unchanged.

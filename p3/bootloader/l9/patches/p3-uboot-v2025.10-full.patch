@@ -522,7 +522,7 @@ index 71dc58da..2c7ed67f 100644
  	struct fsg_buffhd	*bh = req->context;
  
 diff --git a/drivers/usb/gadget/f_rockusb.c b/drivers/usb/gadget/f_rockusb.c
-index d679cdae..5202fba9 100644
+index d679cdae..a43c6398 100644
 --- a/drivers/usb/gadget/f_rockusb.c
 +++ b/drivers/usb/gadget/f_rockusb.c
 @@ -587,6 +587,14 @@ static void cb_get_chip_version(struct usb_ep *ep, struct usb_request *req)
@@ -540,10 +540,38 @@ index d679cdae..5202fba9 100644
  
  	/*
  	 * Chip Version is a string saved in BOOTROM address space Little Endian
-@@ -615,6 +623,109 @@ static void cb_get_chip_version(struct usb_ep *ep, struct usb_request *req)
+@@ -615,6 +623,137 @@ static void cb_get_chip_version(struct usb_ep *ep, struct usb_request *req)
  	rockusb_tx_write((char *)chip_info, sizeof(chip_info));
  }
  
++/*
++ * K_FW_GET_VERSION (0x0C): host-side loaders query this to display the
++ * "Loader Ver" field (RKDevTool bottom bar). Neither mainline U-Boot nor the
++ * vendor 2017.09 U-Boot implemented it (usbplug-only in vendor code), so the
++ * field showed blank. Reply with a 16-byte LE string, same wire format as
++ * GET_CHIP_VER (0x1B) which tools already parse: "RK3566LoaderV100".
++ */
++static void cb_get_version(struct usb_ep *ep, struct usb_request *req)
++{
++	ALLOC_CACHE_ALIGN_BUFFER(struct fsg_bulk_cb_wrap, cbw,
++				 sizeof(struct fsg_bulk_cb_wrap));
++	struct f_rockusb *f_rkusb = get_rkusb();
++	unsigned int chip_info[4];
++
++	chip_info[0] = 0x524B3335; /* "RK35" */
++	chip_info[1] = 0x36364C6F; /* "66Lo" */
++	chip_info[2] = 0x61646572; /* "ader" */
++	chip_info[3] = 0x56313030; /* "V100" */
++
++	memcpy((char *)cbw, req->buf, USB_BULK_CB_WRAP_LEN);
++
++	/* Prepare for sending subsequent CSW_GOOD */
++	f_rkusb->tag = cbw->tag;
++	f_rkusb->in_req->complete = tx_handler_send_csw;
++
++	rockusb_tx_write((char *)chip_info, sizeof(chip_info));
++}
++
 +/*
 + * Rockchip RockUSB flash-info / capability replies.
 + * Format taken from rockchip-linux/u-boot (release branch)
@@ -650,7 +678,16 @@ index d679cdae..5202fba9 100644
  static void cb_read_lba(struct usb_ep *ep, struct usb_request *req)
  {
  	ALLOC_CACHE_ALIGN_BUFFER(struct fsg_bulk_cb_wrap, cbw,
-@@ -851,7 +962,19 @@ static const struct cmd_dispatch_info cmd_dispatch_info[] = {
+@@ -823,7 +962,7 @@ static const struct cmd_dispatch_info cmd_dispatch_info[] = {
+ 	},
+ 	{
+ 		.cmd = K_FW_GET_VERSION,
+-		.cb = cb_not_support,
++		.cb = cb_get_version,
+ 	},
+ 	{
+ 		.cmd = K_FW_LBA_READ_10,
+@@ -851,7 +990,19 @@ static const struct cmd_dispatch_info cmd_dispatch_info[] = {
  	},
  	{
  		.cmd = K_FW_READ_FLASH_INFO,

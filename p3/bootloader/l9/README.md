@@ -1,7 +1,7 @@
 # bootloader/l9 — 当前可用引导固件（2026-11-12 真机验收启动）
 
 主线 U-Boot 2025.10（L9 版），**当前交付版本**。随 v2 刷机包整链真机验收通过：
-`U-Boot 2025.10-dirty (Nov 12 2026 - 21:46:16 +0800)` 启动、rockusb recovery
+`U-Boot 2025.10-dirty (Nov 12 2026 - 23:54 构建, L9a)` 启动、rockusb recovery
 5 秒窗口在、ITS 一次初始化成功（旧 ITS queue timeout 未复现）、
 内核侧 RGMII TX/RX delay 新值生效、eth0 1Gbps 链路 Up。
 
@@ -9,8 +9,8 @@
 
 | 文件 | 大小 | sha256（前16） | 写入位置 |
 |---|---|---|---|
-| `u-boot.itb` | 980,480 B | `e2062ff9c4612c70` | eMMC LBA `0x4000`（u-boot proper 槽） |
-| `u-boot-rockchip.bin` | 9,336,320 B | `abcb3d3c862fb73e` | eMMC LBA `0x40`（idbloader+SPL 起整包，内嵌上面的 itb） |
+| `u-boot.itb` | 980,480 B | `9ffb363619742f6a` | eMMC LBA `0x4000`（u-boot proper 槽） |
+| `u-boot-rockchip.bin` | 9,336,320 B | `bcf7a37dd647090f` | eMMC LBA `0x40`（idbloader+SPL 起整包，内嵌上面的 itb） |
 
 完整 SHA256 见 `SHA256SUMS.txt`。两个文件来自同一次构建，不要混搭其它版本的 idbloader。
 
@@ -35,7 +35,11 @@ rockusb LOADER 能力层（0x1A/0xAA/0x2A/0x2B）。
 2. **rockusb 芯片串号回填**（`f_rockusb.c` `cb_get_chip_version`）：
    BootROM 芯片串为空时回填静态串 `"320A" + 2026 + 1112 + V100`，
    rkdeveloptool `0x1B` 不再返回 16 字节全零。
-3. L8 的全部 LOADER 能力补丁原样保留（详见 ADR-002）。
+3. **rockusb GET_VERSION 回填**（ 新增 ）：
+    命令以与  相同的 16 字节串格式应答 ——
+   RKDevTool 的「Loader Ver」栏读的就是 0x0C，vendor 仅在闭源 usbplug 实现，
+   主线/vendor U-Boot 均未实现，LOADER 模式下该栏一直空白。
+4. L8 的全部 LOADER 能力补丁原样保留（详见 ADR-002）。
 
 ## 刷写方法
 

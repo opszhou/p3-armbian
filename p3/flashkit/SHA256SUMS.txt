@@ -1,4 +1,3 @@
-7d104bcae9c8a0bfa7e5d4af2f0085eb95cf284a8dde1fd957d0774820f0b6d8  01_gpt_bootarea.img  # @0x0 GPT + u-boot chain (LBA0..18432)
-3fbacdd71abb298ac36acc26bfea726e0034ab21b6ff35f94deae853e8ac3912  02_boot.img  # @0x8000 p1 boot 384MiB
-efabca0a0728ea690f609b9443ba6910970b8c6632dc68c82f5ffffab225fb06  03_rootfs.img  # @0xc8000 p2 rootfs fs content (first-boot auto-resize)
-b9c6bda65c738176aef65810451377e3d32af2db0e8c45b726f670f4f605e2f2  04_backup_gpt.img  # @0x1d1efdf backup GPT
+7ff83efe65274c80db792a0899adaec3c069edb56e1482f483861e0c7397c9de  01_gpt_bootarea.img
+b9c6bda65c738176aef65810451377e3d32af2db0e8c45b726f670f4f605e2f2  04_backup_gpt.img
+02_boot.img 3fbacdd71abb298a... - flash @0x8000
