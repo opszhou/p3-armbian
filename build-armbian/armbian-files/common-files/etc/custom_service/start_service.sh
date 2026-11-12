@@ -280,10 +280,20 @@ if [[ -n "$(dpkg -l | awk '{print $2}' | grep -w "^pve-manager$" || true)" ]]; t
 fi
 
 # Maximize root partition size
+# armbian-tf only handles the standard 2-partition ophub layout (it aborts
+# on other GPT layouts, e.g. vendor multi-partition eMMC maps). Fall back
+# to a plain resize2fs of the root filesystem when it fails, so the rootfs
+# always grows into an already-max-sized partition.
 todo_rootfs_resize="/root/.no_rootfs_resize"
 [[ -f "${todo_rootfs_resize}" && "$(cat ${todo_rootfs_resize} 2>/dev/null | xargs)" == "yes" ]] && {
-    armbian-tf >/dev/null 2>&1 &
-    log_message "Root partition resize completed."
+    (
+        armbian-tf >/dev/null 2>&1
+        if [[ "$(df -hT / | awk 'NR==2{print $2}')" == "ext4" ]]; then
+            ROOTDEV="$(findmnt -n -o SOURCE /)"
+            resize2fs "${ROOTDEV}" >/dev/null 2>&1
+        fi
+    ) &
+    log_message "Root partition resize attempted (armbian-tf + resize2fs fallback)."
 }
 
 # Finalization
