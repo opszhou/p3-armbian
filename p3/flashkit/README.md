@@ -4,8 +4,8 @@
 [../bootloader/l9/](../bootloader/l9/)。
 
 **当前唯一推荐刷机包是本目录根下的 v2 套件**（L9 引导链，2026-11-12 真机验收启动）。
-上一代 L8 套件完整存档在 [`l8-archive/`](l8-archive/)（含当时的 README 与
-CHANGELOG，仍可作为引导层回滚件）；`v1.0/` 已弃用，仅原始镜像备份。
+历史版本（L8 刷机套件、v1.0 原始镜像备份）已由 git 版本管理保留：
+git 标签 **`archive-l8`**。
 
 ## 刷机包文件（v2 / L9 引导链）
 
@@ -59,22 +59,3 @@ certutil -hashfile dev_readback2.bin SHA256   :: 应等于 02_boot.img 的 sha25
 - 校验不一致就留在刷机模式重写，不要上电
 
 ---
-
-## l8-archive/ — 上一代 L8 刷机包存档
-
-L8 固件（`01_bootarea.img` @LBA 1 起 + `02_backup_gpt.img`）与当时的
-README / CHANGELOG 完整归档，**仍可用于引导层回滚**（v2 扩容不动分区表，
-回滚 L8 引导层后分区布局依旧有效）。说明见
-[l8-archive/README.md](l8-archive/README.md)。
-
-## v1.0/ — 已弃用（原始镜像备份）
-
-`v1.0` 不再用于刷机（引导层停留在 vendor/L2 时代），仅作原始镜像与救砖
-回滚件的备份归档。见 [v1.0/README.md](v1.0/README.md)。
-
-## 重生成刷机包
-
-v2 套件由 `scripts/build_armbian_compact_v2.py` 生成（容器 `/root/p3builder/`
-工作流，已入库本仓库 scripts/）：整盘组装 → 按 BOOT 分区前空地扩 bootarea →
-切片出 01/02/03/04 四件与 SHA256SUMS。DTB 修复由
-`scripts/patch_dtb_delays.py` 与 p7 boot.img 重打包流程完成。

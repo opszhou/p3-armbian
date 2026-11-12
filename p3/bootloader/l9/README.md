@@ -41,8 +41,8 @@ rockusb LOADER 能力层（0x1A/0xAA/0x2A/0x2B）。
 
 - **推荐**：直接刷 v2 两件套（01_gpt_bootarea.img @0x0 + 02_boot.img @0x8000），
   见 [flashkit/README.md](../../flashkit/README.md)。
-- 单独换引导层：L8 README 中的方法 B（`upgrade_tool wl 0x40 u-boot-rockchip.bin`
-  起整包）与 UMS 通道仍适用；写后必须读回比对。
+- 单独换引导层：`upgrade_tool wl 0x40 u-boot-rockchip.bin`（idbloader 起整包）
+  与 UMS 通道仍适用；写后必须读回比对。
 
 **⚠️ 铁律**：与 L8 相同——写物理盘前核对盘号与 15,634,268,160 B 容量；
 Windows 提示格式化一律拒绝；写完断电 ≥10 s；`wl` 报 100% 不算成功，必须读回比对。
@@ -50,4 +50,4 @@ Windows 提示格式化一律拒绝；写完断电 ≥10 s；`wl` 报 100% 不�
 ## 历史版本
 
 L1~L8 演进、事故与决策记录见 `ADR-002-uboot-upgrade.md`（§18 为 L7/L8 事件定案）。
-L8 固件本体归档在 [../l8/](../l8/)。
+L8 固件本体见 git 标签 `archive-l8`（`bootloader/l8/`）。

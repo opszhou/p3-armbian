@@ -73,9 +73,10 @@ rootfs is NOT touched unless 03_rootfs.img is explicitly flashed.
   UMS-without-dwc3-noise re-verification pending.
 
 [ROLLBACK]
-The L8 kit in l8-archive/ is still valid for boot-layer rollback:
-flash 01_bootarea.img @LBA 1 + 02_backup_gpt.img @0x1D1EFDF with the same
-force-by-address procedure. The v2 bootarea expansion did not move any
+The L8 kit is preserved in git history, git tag "archive-l8":
+at that revision, flashkit/01_bootarea.img @LBA 1 plus
+flashkit/02_backup_gpt.img @0x1D1EFDF restore the previous boot chain,
+using the same force-by-address procedure. The v2 bootarea expansion did not move any
 partition, so reverting the boot layer does not affect BOOT/rootfs.
 BootROM Maskrom (short eMMC CLK + power) remains the ultimate rescue,
 independent of everything above.
