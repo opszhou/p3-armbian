@@ -35,8 +35,8 @@ rockusb LOADER 能力层（0x1A/0xAA/0x2A/0x2B）。
 2. **rockusb 芯片串号回填**（`f_rockusb.c` `cb_get_chip_version`）：
    BootROM 芯片串为空时回填静态串 `"320A" + 2026 + 1112 + V100`，
    rkdeveloptool `0x1B` 不再返回 16 字节全零。
-3. **rockusb GET_VERSION 回填**（ 新增 ）：
-    命令以与  相同的 16 字节串格式应答 ——
+3. **rockusb GET_VERSION 回填**（`f_rockusb.c` 新增 `cb_get_version`）：
+   `0x0C` 命令以与 `0x1B` 相同的 16 字节串格式应答 `RK3566LoaderV100`——
    RKDevTool 的「Loader Ver」栏读的就是 0x0C，vendor 仅在闭源 usbplug 实现，
    主线/vendor U-Boot 均未实现，LOADER 模式下该栏一直空白。
 4. L8 的全部 LOADER 能力补丁原样保留（详见 ADR-002）。
