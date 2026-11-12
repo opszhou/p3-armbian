@@ -1,0 +1,673 @@
+diff --git a/arch/arm/dts/rk3568-p3.dts b/arch/arm/dts/rk3568-p3.dts
+new file mode 100644
+index 00000000..291715ce
+--- /dev/null
++++ b/arch/arm/dts/rk3568-p3.dts
+@@ -0,0 +1,129 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * Onething P3 (RK3566 TV box) board device tree for U-Boot.
++ *
++ * Derived from rk3568-generic.dts. Adds:
++ *  - SARADC channel 0 download/recovery key (volume up, KEY_VOLUMEUP=115)
++ *  - GMAC1 @ fe010000 (RGMII, RTL8211F, tx_delay=0x4f rx_delay=0x2d, reset gpio3_18)
++ *  - USB0 OTG mode for RockUSB / UMS
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include "rk356x-base.dtsi"
++
++/ {
++	model = "Onething P3 RK3566 BOX";
++	compatible = "rockchip,rk3566";
++
++	aliases {
++		mmc0 = &sdhci;
++		mmc1 = &sdmmc0;
++		ethernet0 = &gmac1;
++	};
++
++	chosen {
++		stdout-path = "serial2:1500000n8";
++	};
++
++	adc-keys {
++		compatible = "adc-keys";
++		io-channels = <&saradc 0>;
++		io-channel-names = "buttons";
++		keyup-threshold-microvolt = <1800000>;
++		poll-interval = <100>;
++
++		volumeup-key {
++			label = "volume up";
++			linux,code = <115>; /* KEY_VOLUMEUP */
++			press-threshold-microvolt = <9>;
++		};
++	};
++};
++
++&sdhci {
++	bus-width = <8>;
++	cap-mmc-highspeed;
++	mmc-hs200-1_8v;
++	no-sd;
++	no-sdio;
++	non-removable;
++	pinctrl-names = "default";
++	pinctrl-0 = <&emmc_bus8 &emmc_clk &emmc_cmd &emmc_datastrobe>;
++	status = "okay";
++};
++
++&sdmmc0 {
++	bus-width = <4>;
++	cap-sd-highspeed;
++	disable-wp;
++	no-mmc;
++	no-sdio;
++	pinctrl-names = "default";
++	pinctrl-0 = <&sdmmc0_bus4 &sdmmc0_clk &sdmmc0_cmd &sdmmc0_det>;
++	status = "okay";
++};
++
++&sfc {
++	#address-cells = <1>;
++	#size-cells = <0>;
++	status = "okay";
++
++	flash@0 {
++		compatible = "jedec,spi-nor";
++		reg = <0>;
++		spi-max-frequency = <24000000>;
++	};
++};
++
++&uart2 {
++	status = "okay";
++};
++
++&saradc {
++	status = "okay";
++	vdd-microvolts = <1800000>;
++};
++
++&usb_host0_xhci {
++	dr_mode = "otg";
++	extcon = <&usb2phy0>;
++	maximum-speed = "high-speed";
++	phys = <&usb2phy0_otg>;
++	phy-names = "usb2-phy";
++	status = "okay";
++};
++
++&usb2phy0 {
++	status = "okay";
++};
++
++&usb2phy0_otg {
++	status = "okay";
++};
++
++&gmac1 {
++	phy-mode = "rgmii";
++	clock_in_out = "input";
++	tx_delay = <0x4f>;
++	rx_delay = <0x2d>;
++	snps,reset-gpio = <&gpio3 RK_PC2 GPIO_ACTIVE_LOW>;
++	snps,reset-active-low;
++	snps,reset-delays-us = <0 20000 100000>;
++	phy-handle = <&rgmii_phy1>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&gmac1m1_miim
++		     &gmac1m1_tx_bus2
++		     &gmac1m1_rx_bus2
++		     &gmac1m1_rgmii_clk
++		     &gmac1m1_rgmii_bus>;
++	status = "okay";
++};
++
++&mdio1 {
++	rgmii_phy1: ethernet-phy@0 {
++		compatible = "ethernet-phy-ieee802.3-c22";
++		reg = <0x0>;
++	};
++};
+diff --git a/arch/arm/include/asm/arch-rockchip/f_rockusb.h b/arch/arm/include/asm/arch-rockchip/f_rockusb.h
+index 9abb3b16..2cb3c945 100644
+--- a/arch/arm/include/asm/arch-rockchip/f_rockusb.h
++++ b/arch/arm/include/asm/arch-rockchip/f_rockusb.h
+@@ -64,8 +64,11 @@ K_FW_SET_RESET_FLAG = 0x1E,
+ K_FW_SPI_READ_10 = 0x21,
+ K_FW_SPI_WRITE_10 = 0x22,
+ K_FW_LBA_ERASE_10 = 0x25,
++K_FW_CHANGE_STORAGE = 0x2A,
++K_FW_READ_STORAGE = 0x2B,
+ 
+ K_FW_SESSION = 0x30,
++K_FW_READ_CAPACITY = 0xAA,
+ K_FW_RESET = 0xff,
+ };
+ 
+diff --git a/arch/arm/mach-rockchip/board.c b/arch/arm/mach-rockchip/board.c
+index 2e6bb38b..7bed1f9b 100644
+--- a/arch/arm/mach-rockchip/board.c
++++ b/arch/arm/mach-rockchip/board.c
+@@ -226,6 +226,14 @@ int g_dnl_bind_fixup(struct usb_device_descriptor *dev, const char *name)
+ 	else
+ 		put_unaligned(CONFIG_USB_GADGET_PRODUCT_NUM, &dev->idProduct);
+ 
++	/* P3_LOADER_BCDUSB: rkdeveloptool / RKDevTool classify MASKROM vs
++	 * LOADER by bcdUSB. Upstream defaults to 0x0200 (reported as Maskrom);
++	 * the Rockchip vendor fork sets 0x0201 "Enumerate as a loader device".
++	 * Only the rockusb gadget is affected; UMS/fastboot keep their PID path.
++	 */
++	if (!strcmp(name, "usb_dnl_rockusb"))
++		dev->bcdUSB = cpu_to_le16(0x0201);
++
+ 	return 0;
+ }
+ #endif /* CONFIG_USB_GADGET_DOWNLOAD */
+diff --git a/arch/arm/mach-rockchip/boot_mode.c b/arch/arm/mach-rockchip/boot_mode.c
+index 55e94566..b133e4f4 100644
+--- a/arch/arm/mach-rockchip/boot_mode.c
++++ b/arch/arm/mach-rockchip/boot_mode.c
+@@ -77,9 +77,22 @@ __weak int rockchip_dnl_key_pressed(void)
+ void rockchip_dnl_mode_check(void)
+ {
+ 	if (rockchip_dnl_key_pressed()) {
+-		printf("download key pressed, entering download mode...");
++#if defined(CONFIG_CMD_ROCKUSB)
++		/*
++		 * Board-specific behaviour (Onething P3): unlike upstream, do
++		 * NOT reset back to the BootROM (Maskrom). Instead stay in
++		 * U-Boot and let preboot start the rockusb gadget, so the box
++		 * lands in LOADER mode directly (like the vendor firmware).
++		 *
++		 * preboot clears itself first so it only runs once.
++		 */
++		printf("download key pressed, entering rockusb loader mode...\n");
++		env_set("preboot", "setenv preboot; rockusb 0 mmc 0");
++#else
++		printf("download key pressed, entering download mode...\n");
+ 		set_back_to_bootrom_dnl_flag();
+ 		do_reset(NULL, 0, 0, NULL);
++#endif
+ 	}
+ }
+ 
+diff --git a/arch/arm/mach-rockchip/rk3568/Kconfig b/arch/arm/mach-rockchip/rk3568/Kconfig
+index 01b53a47..8c79b271 100644
+--- a/arch/arm/mach-rockchip/rk3568/Kconfig
++++ b/arch/arm/mach-rockchip/rk3568/Kconfig
+@@ -59,6 +59,11 @@ config TARGET_ORANGEPI_3B_RK3566
+ 	help
+ 	  Xunlong Orange Pi 3B single board computer with a RK3566 SoC.
+ 
++config TARGET_P3_RK3566
++	bool "Onething P3 RK3566 TV box"
++	help
++	  Onething P3 RK3566 based TV box.
++
+ endchoice
+ 
+ config ROCKCHIP_BOOT_MODE_REG
+@@ -74,6 +79,7 @@ config TEXT_BASE
+ 	default 0x00a00000
+ 
+ source "board/rockchip/evb_rk3568/Kconfig"
++source "board/rockchip/p3/Kconfig"
+ source "board/anbernic/rgxx3_rk3566/Kconfig"
+ source "board/hardkernel/odroid_m1/Kconfig"
+ source "board/hardkernel/odroid_m1s/Kconfig"
+diff --git a/board/rockchip/p3/Kconfig b/board/rockchip/p3/Kconfig
+new file mode 100644
+index 00000000..d77d93de
+--- /dev/null
++++ b/board/rockchip/p3/Kconfig
+@@ -0,0 +1,9 @@
++if TARGET_P3_RK3566
++
++config SYS_BOARD
++	default "p3"
++
++config SYS_VENDOR
++	default "rockchip"
++
++endif
+diff --git a/board/rockchip/p3/Makefile b/board/rockchip/p3/Makefile
+new file mode 100644
+index 00000000..426d56f6
+--- /dev/null
++++ b/board/rockchip/p3/Makefile
+@@ -0,0 +1,6 @@
++# SPDX-License-Identifier: GPL-2.0+
++# The download-key hook is only used by U-Boot proper (boot_mode.o is
++# not built for SPL/TPL), so keep p3.o out of the SPL build.
++ifndef CONFIG_SPL_BUILD
++obj-y += p3.o
++endif
+diff --git a/board/rockchip/p3/p3.c b/board/rockchip/p3/p3.c
+new file mode 100644
+index 00000000..977ad425
+--- /dev/null
++++ b/board/rockchip/p3/p3.c
+@@ -0,0 +1,134 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Board specific download-key detection for the Onething P3 RK3566 box.
++ *
++ * Two independent recovery triggers; either one is enough:
++ *
++ *   1. UART (primary, "own" recovery): press 'r' / 'R' during the short
++ *      window announced at boot. This path does not touch SARADC at all,
++ *      so it keeps working even when the ADC regulator is missing.
++ *
++ *   2. Physical RECOVERY key on SARADC channel 0 (volume up, KEY_VOLUMEUP).
++ *      The generic __weak implementation hard-codes channel 1, hence the
++ *      override. keyup-threshold-microvolt is 1800000, so released is close
++ *      to full scale (~4095) and pressed is close to 0.
++ *
++ * On a hit, rockchip_dnl_mode_check() sets
++ *   preboot = "setenv preboot; rockusb 0 mmc 0"
++ * so U-Boot proper enters the rockusb gadget before autoboot.
++ */
++
++#include <adc.h>
++#include <dm/device.h>
++#include <dm/uclass.h>
++#include <linux/delay.h>
++#include <linux/printk.h>
++#include <linux/string.h>
++#include <stdio.h>
++#include <command.h>
++
++#define KEY_DOWN_MIN_VAL	0
++#define KEY_DOWN_MAX_VAL	200
++
++/* UART recovery window: 50 polls x 100 ms = 5 s */
++#define UART_RECOVERY_POLLS	50
++#define UART_RECOVERY_DELAY_MS	100
++
++static int p3_read_dnl_adc(struct udevice *dev, unsigned int *val)
++{
++	int ret;
++
++	ret = adc_channel_single_shot(dev->name, 0, val);
++	if (ret) {
++		/*
++		 * ADC may be unavailable on some board revisions (for example
++		 * when saradc has no vref-supply). Keep quiet: the UART trigger
++		 * is the primary path and must not be drowned out by errors.
++		 */
++		return ret;
++	}
++
++	printf("dnl key: adc=%u (press if <= %u)\n", *val, KEY_DOWN_MAX_VAL);
++	return 0;
++}
++
++static int p3_adc_key_pressed(void)
++{
++	struct udevice *dev;
++	struct uclass *uc;
++	unsigned int val;
++	int ret;
++
++	ret = uclass_get(UCLASS_ADC, &uc);
++	if (ret)
++		return false;
++
++	ret = -ENODEV;
++	uclass_foreach_dev(dev, uc) {
++		if (!strncmp(dev->name, "saradc", 6)) {
++			ret = 0;
++			break;
++		}
++	}
++
++	if (ret == -ENODEV)
++		return false;
++
++	if (p3_read_dnl_adc(dev, &val))
++		return false;
++
++	if (val >= KEY_DOWN_MIN_VAL && val <= KEY_DOWN_MAX_VAL)
++		return true;
++
++	/* Second sample: the key may have been pressed slightly later. */
++	mdelay(50);
++
++	if (p3_read_dnl_adc(dev, &val))
++		return false;
++
++	return val >= KEY_DOWN_MIN_VAL && val <= KEY_DOWN_MAX_VAL;
++}
++
++static int p3_uart_key_pressed(void)
++{
++	int i;
++
++	printf("Recovery: press 'r' within 5s for rockusb loader...\n");
++
++	for (i = 0; i < UART_RECOVERY_POLLS; i++) {
++		if (tstc()) {
++			int c = getchar();
++
++			if (c == 'r' || c == 'R') {
++				printf("Recovery: 'r' pressed, entering rockusb loader mode...\n");
++				return true;
++			}
++		}
++		mdelay(UART_RECOVERY_DELAY_MS);
++	}
++
++	return false;
++}
++
++int rockchip_dnl_key_pressed(void)
++{
++	if (p3_uart_key_pressed())
++		return true;
++
++	return p3_adc_key_pressed();
++}
++
++/*
++ * Short alias for the rockusb LOADER. The gadget loop runs until Ctrl+C;
++ * this only saves the operator from typing "rockusb 0 mmc 0" every time.
++ */
++static int do_p3_recovery(struct cmd_tbl *cmdtp, int flag, int argc,
++			  char *const argv[])
++{
++	printf("Entering rockusb loader (Ctrl+C to exit)...\n");
++	return run_command("rockusb 0 mmc 0", 0);
++}
++
++U_BOOT_CMD(recovery, 1, 0, do_p3_recovery,
++	   "enter rockusb LOADER for PC flashing",
++	   "");
+diff --git a/drivers/usb/dwc3/gadget.c b/drivers/usb/dwc3/gadget.c
+index 2b01113d..b43b4cc0 100644
+--- a/drivers/usb/dwc3/gadget.c
++++ b/drivers/usb/dwc3/gadget.c
+@@ -1168,7 +1168,9 @@ static int dwc3_gadget_ep_dequeue(struct usb_ep *ep,
+ 			dwc3_stop_active_transfer(dwc, dep->number, true);
+ 			goto out1;
+ 		}
+-		dev_err(dwc->dev, "request %p was not queued to %s\n",
++		/* P3_UMS_QUIET: benign race - the request already completed
++		 * and dequeueing it is a no-op.  Demoted from dev_err. */
++		dev_dbg(dwc->dev, "request %p was not queued to %s\n",
+ 				request, ep->name);
+ 		ret = -EINVAL;
+ 		goto out0;
+diff --git a/drivers/usb/gadget/composite.c b/drivers/usb/gadget/composite.c
+index 04b85419..9185f1eb 100644
+--- a/drivers/usb/gadget/composite.c
++++ b/drivers/usb/gadget/composite.c
+@@ -783,6 +783,33 @@ static void composite_setup_complete(struct usb_ep *ep, struct usb_request *req)
+ 				req->status, req->actual, req->length);
+ }
+ 
++/* P3_LOADER_BOS: minimal BOS for high-speed devices reporting
++ * bcdUSB >= 0x0201.  Windows 8+ hard-requires a BOS descriptor from
++ * such devices; stalling the request aborts enumeration ("device
++ * descriptor request failed").  We advertise a bare USB 2.0 Extension
++ * capability with bmAttributes = 0: LPM is NOT supported by dwc2, so
++ * unlike bos_desc() we must not claim USB_LPM_SUPPORT.
++ */
++static int bos_desc_hs(struct usb_composite_dev *cdev)
++{
++	struct usb_bos_descriptor       *bos = cdev->req->buf;
++	struct usb_ext_cap_descriptor   *usb_ext;
++
++	bos->bLength = USB_DT_BOS_SIZE;
++	bos->bDescriptorType = USB_DT_BOS;
++	bos->wTotalLength = cpu_to_le16(USB_DT_BOS_SIZE +
++					USB_DT_USB_EXT_CAP_SIZE);
++	bos->bNumDeviceCaps = 1;
++
++	usb_ext = cdev->req->buf + USB_DT_BOS_SIZE;
++	usb_ext->bLength = USB_DT_USB_EXT_CAP_SIZE;
++	usb_ext->bDescriptorType = USB_DT_DEVICE_CAPABILITY;
++	usb_ext->bDevCapabilityType = USB_CAP_TYPE_EXT;
++	usb_ext->bmAttributes = 0;
++
++	return le16_to_cpu(bos->wTotalLength);
++}
++
+ static int bos_desc(struct usb_composite_dev *cdev)
+ {
+ 	struct usb_ext_cap_descriptor   *usb_ext;
+@@ -1051,7 +1078,14 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
+ 				cdev->desc.bcdUSB = cpu_to_le16(0x0310);
+ 				cdev->desc.bMaxPacketSize0 = 9;
+ 			} else {
+-				cdev->desc.bcdUSB = cpu_to_le16(0x0200);
++				/* P3_LOADER_BCDUSB: Rockchip tools classify MASKROM vs LOADER
++				 * by bcdUSB bit 0 (rkdeveloptool RKScan.cpp:395).
++				 * g_dnl_bind_fixup() sets 0x0201 for usb_dnl_rockusb;
++				 * keep it instead of forcing the standard 0x0200.
++				 * Other gadgets (UMS/fastboot/ether) stay at 0x0200.
++				 */
++				if (cdev->desc.bcdUSB != cpu_to_le16(0x0201))
++					cdev->desc.bcdUSB = cpu_to_le16(0x0200);
+ 			}
+ 			value = min(w_length, (u16) sizeof cdev->desc);
+ 			memcpy(req->buf, &cdev->desc, value);
+@@ -1084,12 +1118,19 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
+ 			/*
+ 			 * Super speed connection should support BOS, and
+ 			 * USB compliance test (USB 2.0 Command Verifier)
+-			 * also issues this request, return for now for
+-			 * USB 2.0 connection.
++			 * also issues this request.
+ 			 */
+ 			if (gadget->speed >= USB_SPEED_SUPER) {
+ 				value = bos_desc(cdev);
+ 				value = min(w_length, (u16)value);
++			} else if (le16_to_cpu(cdev->desc.bcdUSB) >= 0x0201) {
++				/* P3_LOADER_BOS: bcdUSB >= 0x0201 (USB 2.01+)
++				 * makes Windows request BOS unconditionally;
++				 * stalling it fails enumeration.  Serve the
++				 * minimal high-speed BOS instead of stalling.
++				 */
++				value = bos_desc_hs(cdev);
++				value = min(w_length, (u16)value);
+ 			}
+ 			break;
+ 		default:
+diff --git a/drivers/usb/gadget/f_mass_storage.c b/drivers/usb/gadget/f_mass_storage.c
+index 71dc58da..2c7ed67f 100644
+--- a/drivers/usb/gadget/f_mass_storage.c
++++ b/drivers/usb/gadget/f_mass_storage.c
+@@ -246,6 +246,7 @@
+ #include <malloc.h>
+ #include <console.h>
+ #include <g_dnl.h>
++#include <env.h> /* P3_UMS_DBG */
+ #include <dm/devres.h>
+ #include <linux/bug.h>
+ 
+@@ -489,8 +490,22 @@ static int ep0_queue(struct fsg_common *common)
+ /* Bulk and interrupt endpoint completion handlers.
+  * These always run in_irq. */
+ 
++/* P3_UMS_DBG: completion counter, enabled by env ums_dbg=1, prints
++ * every 16 completions to localise the ~16 MiB UMS write stall. */
++static void p3_ums_tick(const char *dir)
++{
++	static int in_n, out_n;
++	int *n = (dir[5] == 'i') ? &in_n : &out_n;
++
++	if (!env_get("ums_dbg"))
++		return;
++	if (++*n % 16 == 0)
++		printf("P3 ums_dbg: %d %s completions\n", *n, dir);
++}
++
+ static void bulk_in_complete(struct usb_ep *ep, struct usb_request *req)
+ {
++	p3_ums_tick("bulk-in");
+ 	struct fsg_common	*common = ep->driver_data;
+ 	struct fsg_buffhd	*bh = req->context;
+ 
+@@ -508,6 +523,7 @@ static void bulk_in_complete(struct usb_ep *ep, struct usb_request *req)
+ 
+ static void bulk_out_complete(struct usb_ep *ep, struct usb_request *req)
+ {
++	p3_ums_tick("bulk-out");
+ 	struct fsg_common	*common = ep->driver_data;
+ 	struct fsg_buffhd	*bh = req->context;
+ 
+diff --git a/drivers/usb/gadget/f_rockusb.c b/drivers/usb/gadget/f_rockusb.c
+index d679cdae..5202fba9 100644
+--- a/drivers/usb/gadget/f_rockusb.c
++++ b/drivers/usb/gadget/f_rockusb.c
+@@ -587,6 +587,14 @@ static void cb_get_chip_version(struct usb_ep *ep, struct usb_request *req)
+ 
+ 	memset(chip_info, 0, sizeof(chip_info));
+ 	rk_get_bootrom_chip_version(chip_info, 4);
++	if (!chip_info[0]) {
++		/* RK3566: ATF hides bootrom; weak reader returns zeros. Report
++		 * static RK32-family id so rkdeveloptool shows a Loader Ver. */
++		chip_info[0] = 0x33323041; /* "320A" */
++		chip_info[1] = 0x32303236; /* "2026" */
++		chip_info[2] = 0x31313132; /* "1112" */
++		chip_info[3] = 0x56313030; /* "V100" */
++	}
+ 
+ 	/*
+ 	 * Chip Version is a string saved in BOOTROM address space Little Endian
+@@ -615,6 +623,109 @@ static void cb_get_chip_version(struct usb_ep *ep, struct usb_request *req)
+ 	rockusb_tx_write((char *)chip_info, sizeof(chip_info));
+ }
+ 
++/*
++ * Rockchip RockUSB flash-info / capability replies.
++ * Format taken from rockchip-linux/u-boot (release branch)
++ * drivers/usb/gadget/f_rockusb.c, archived in /root/p3builder/refs/.
++ * Mainline implements only LBA read/write, so upgrade_tool wl bails out at
++ * its flash-info pre-check and RKDevTool fails at "Switch storage to EMMC".
++ */
++struct rk_flash_info {
++	u32 flash_size;
++	u16 block_size;
++	u8  page_size;
++	u8  ecc_bits;
++	u8  access_time;
++	u8  manufacturer;
++	u8  flash_mask;
++} __attribute__((packed));
++
++static void cb_read_flash_info(struct usb_ep *ep, struct usb_request *req)
++{
++	ALLOC_CACHE_ALIGN_BUFFER(struct fsg_bulk_cb_wrap, cbw,
++				 sizeof(struct fsg_bulk_cb_wrap));
++	struct f_rockusb *f_rkusb = get_rkusb();
++	struct rk_flash_info finfo = {
++		.block_size = 1024, .ecc_bits = 0, .page_size = 4,
++		.access_time = 40, .manufacturer = 0, .flash_mask = 0,
++	};
++
++	memcpy((char *)cbw, req->buf, USB_BULK_CB_WRAP_LEN);
++
++	if (!f_rkusb->desc) {
++		f_rkusb->desc = blk_get_dev(f_rkusb->dev_type,
++					    f_rkusb->dev_index);
++		if (!f_rkusb->desc ||
++		    f_rkusb->desc->type == DEV_TYPE_UNKNOWN) {
++			rockusb_tx_write_csw(cbw->tag, 0, CSW_FAIL,
++					     USB_BULK_CS_WRAP_LEN);
++			return;
++		}
++	}
++	finfo.flash_size = (u32)f_rkusb->desc->lba;
++	if (finfo.flash_size)
++		finfo.flash_mask = 1;
++
++	f_rkusb->tag = cbw->tag;
++	f_rkusb->in_req->complete = tx_handler_send_csw;
++	rockusb_tx_write((char *)&finfo, sizeof(finfo));
++}
++
++static void cb_read_capacity(struct usb_ep *ep, struct usb_request *req)
++{
++	ALLOC_CACHE_ALIGN_BUFFER(struct fsg_bulk_cb_wrap, cbw,
++				 sizeof(struct fsg_bulk_cb_wrap));
++	struct f_rockusb *f_rkusb = get_rkusb();
++	u8 buf[8];
++
++	memcpy((char *)cbw, req->buf, USB_BULK_CB_WRAP_LEN);
++
++	memset(buf, 0, sizeof(buf));
++	/* eMMC: Direct LBA | First 4M Access | New Vendor Storage API */
++	buf[0] = 0x15;
++
++	f_rkusb->tag = cbw->tag;
++	f_rkusb->in_req->complete = tx_handler_send_csw;
++	rockusb_tx_write((char *)buf, sizeof(buf));
++}
++
++/*
++ * RKDevTool GUI sends CHANGE_STORAGE (0x2A) before any LBA write.
++ * rkdeveloptool's RKU_ChangeStorage() leaves dwCBWTransferLength at 0 and
++ * only checks the CSW status, so a CSW_GOOD no-op is sufficient: this board
++ * has eMMC only and the gadget is already bound to mmc 0.
++ * READ_STORAGE (0x2B) returns a 4-byte bitmap; bit 0 = eMMC.
++ * Without these the gadget falls through to the default branch at
++ * f_rockusb.c:985, replies "FAILunknown command" and the GUI bulk read
++ * fails with os error 31.
++ */
++static void cb_change_storage(struct usb_ep *ep, struct usb_request *req)
++{
++	ALLOC_CACHE_ALIGN_BUFFER(struct fsg_bulk_cb_wrap, cbw,
++				 sizeof(struct fsg_bulk_cb_wrap));
++	memcpy((char *)cbw, req->buf, USB_BULK_CB_WRAP_LEN);
++	printf("rockusb: change storage -> %u (no-op, eMMC only)\n",
++	       cbw->CDB[1]);
++	rockusb_tx_write_csw(cbw->tag, 0, CSW_GOOD, USB_BULK_CS_WRAP_LEN);
++}
++
++static void cb_read_storage(struct usb_ep *ep, struct usb_request *req)
++{
++	ALLOC_CACHE_ALIGN_BUFFER(struct fsg_bulk_cb_wrap, cbw,
++				 sizeof(struct fsg_bulk_cb_wrap));
++	struct f_rockusb *f_rkusb = get_rkusb();
++	/* L6_STORAGE_BIT: rkdeveloptool main.cpp:59 says 1=EMMC, 2=SD,
++	 * 9=SPINOR; RKU_ReadStorage() takes the first set bit index.
++	 * EMMC id 1 => bit 1 => value 2. bit 0 (value 1) reads as FLASH.
++	 */
++	u32 bits = 1u << 1;	/* bit 1 = EMMC */
++
++	memcpy((char *)cbw, req->buf, USB_BULK_CB_WRAP_LEN);
++	f_rkusb->tag = cbw->tag;
++	f_rkusb->in_req->complete = tx_handler_send_csw;
++	rockusb_tx_write((char *)&bits, sizeof(bits));
++}
++
+ static void cb_read_lba(struct usb_ep *ep, struct usb_request *req)
+ {
+ 	ALLOC_CACHE_ALIGN_BUFFER(struct fsg_bulk_cb_wrap, cbw,
+@@ -851,7 +962,19 @@ static const struct cmd_dispatch_info cmd_dispatch_info[] = {
+ 	},
+ 	{
+ 		.cmd = K_FW_READ_FLASH_INFO,
+-		.cb = cb_not_support,
++		.cb = cb_read_flash_info,
++	},
++	{
++		.cmd = K_FW_READ_CAPACITY,
++		.cb = cb_read_capacity,
++	},
++	{
++		.cmd = K_FW_CHANGE_STORAGE,
++		.cb = cb_change_storage,
++	},
++	{
++		.cmd = K_FW_READ_STORAGE,
++		.cb = cb_read_storage,
+ 	},
+ 	{
+ 		.cmd = K_FW_GET_CHIP_VER,

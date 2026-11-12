@@ -1,0 +1,81 @@
+P3 TV Box - Custom Bootloader Flash Kit (v2 / L9 boot chain)
+=============================================================
+All file names, paths and RKDevTool "Name" cells are ASCII on purpose.
+This file is 100% ASCII -- nothing here can break tool encoding.
+
+Kit built from: l9_uboot   u-boot.itb sha256 e2062ff9c4612c70
+Validated on real hardware 2026-11-12 (two-piece flash 01@0x0 + 02@0x8000,
+reboot into U-Boot 2025.10-dirty Nov 12 21:46, kernel boot to login prompt).
+
+[WHAT THIS KIT IS]
+Replaces the whole boot chain: protective MBR + primary GPT + idbloader +
+mainline U-Boot 2025.10 (L9) + expanded bootarea (01_gpt_bootarea.img),
+plus the BOOT partition content with the repaired DTB (02_boot.img).
+rootfs is NOT touched unless 03_rootfs.img is explicitly flashed.
+
+[WHAT CHANGED VS THE L8 KIT (archived in l8-archive/)]
+1. 01_bootarea.img renamed to 01_gpt_bootarea.img and now starts at LBA 0
+   (protective MBR + GPT header included; the old kit started at LBA 1).
+   bootarea expanded 18297 -> 18432 LBA to fit the larger itb (980480 B).
+   The expansion lands in the empty gap before BOOT (LBA 32768); the GPT
+   partition entry table is unchanged. Backup GPT derived fields
+   (MyLBA / AlternativeLBA / PartitionEntryLBA + CRC) recomputed in
+   04_backup_gpt.img.
+2. New 02_boot.img (@0x8000, full 384 MiB BOOT partition image): kernel +
+   initrd + repaired DTB. DTB fixes carried by this image:
+   - RGMII tx_delay 0x4f -> 0x25, rx_delay 0x2d -> 0x15
+     (0x4f is inside the TX dead zone; 0x15 sits at the RX cliff edge;
+     final values chosen at the center of the measured scan windows:
+     rx 0x00-0x29 solid, tx 0x00-0x49 solid)
+   - SCMI cpu/gpu clocks -> CRU gates (ARMCLK / CLK_GPU / ACLK_GPU_PRE)
+   - PWM fdd70000/fdd70010 pinctrl-names default -> active + interrupts
+   - sdmmc0 disabled (empty SD slot)
+3. rockusb chip serial: cb_get_chip_version fills a static serial
+   ("320A" + 2026 + 1112 + V100) when the BootROM serial is empty,
+   so rkdeveloptool 0x1B no longer returns 16 zero bytes.
+
+[FLASH PROCEDURE - RKDevTool, force-by-address, 2 lines]
+  [x] 0x00000000  01_gpt_bootarea.img
+  [x] 0x00008000  02_boot.img
+  [ ] 0x01D1EFDF  04_backup_gpt.img   (optional backup GPT)
+
+  CLI equivalent:
+    upgrade_tool.exe wl 0x0 01_gpt_bootarea.img
+    upgrade_tool.exe wl 0x8000 02_boot.img
+
+[VERIFY - read back and compare sha256, mandatory]
+  upgrade_tool.exe rl 0 18432 dev_readback1.bin
+  upgrade_tool.exe rl 32768 786432 dev_readback2.bin
+  18432 sectors * 512 = 9437696 B  == size of 01_gpt_bootarea.img
+  786432 sectors * 512 = 402653184 B == size of 02_boot.img
+  Compare with certutil -hashfile / Get-FileHash against SHA256SUMS.txt.
+  dev_readback*.bin are one-shot temp files, delete after comparing.
+
+[RULES]
+- Check the physical drive number and the 15,634,268,160 B disk capacity
+  before any raw-disk write. Refuse every Windows "format the disk" prompt.
+- Power off >= 10 s after flashing (not reset).
+- If read-back does not match, stay in flash mode and rewrite; do not boot.
+
+[REAL-HARDWARE VERIFICATION 2026-11-12]
+- U-Boot banner: U-Boot 2025.10-dirty (Nov 12 2026 - 21:46:16 +0800),
+  "Recovery: press 'r' within 5s for rockusb loader..." present.
+- GIC ITS: 8192 Devices + 32768 Interrupt Collections allocated on the
+  first try; the historical "ITS queue timeout" did NOT appear with this
+  boot chain.
+- Kernel 6.12.69-rk35xx-ophub: rk_gmac-dwmac printed TX delay(0x25) /
+  RX delay(0x15); eth0 Link Up 1Gbps/Full (RTL8211F partner).
+  eMMC HS400 Enhanced strobe OK, rootfs mounted, systemd to login prompt.
+- Open items at validation time: cpufreq still fails ("failed to get
+  cpu0 reg" - vdd_cpu regulator not wired up yet); psci_checker still
+  compiled into the ophub kernel (CI kernel with
+  CONFIG_ARM_PSCI_CHECKER=n pending); RKDevTool Loader Ver readback and
+  UMS-without-dwc3-noise re-verification pending.
+
+[ROLLBACK]
+The L8 kit in l8-archive/ is still valid for boot-layer rollback:
+flash 01_bootarea.img @LBA 1 + 02_backup_gpt.img @0x1D1EFDF with the same
+force-by-address procedure. The v2 bootarea expansion did not move any
+partition, so reverting the boot layer does not affect BOOT/rootfs.
+BootROM Maskrom (short eMMC CLK + power) remains the ultimate rescue,
+independent of everything above.
