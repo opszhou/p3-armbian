@@ -1,0 +1,40 @@
+#!/bin/bash
+# p3boot - one-shot boot target switch for P3 (RK3566) U-Boot L10+
+# Writes a flag sector at LBA 24576 (gap between bootloader area and boot part).
+set -euo pipefail
+LBA=24576
+DEV=/dev/mmcblk0
+TMP=/tmp/.p3boot.flag
+usage() {
+  echo "usage: p3boot <usb|emmc|clear|status> [--reboot]"
+  echo "  usb     next boot boots from USB only"
+  echo "  emmc    next boot boots from eMMC even if a USB stick is inserted"
+  echo "  clear   remove flag (default: USB first, then eMMC)"
+  echo "  status  show flag"
+  exit 1
+}
+write_flag() {
+  { printf 'P3BOOT01%c' "$1"; head -c 503 /dev/zero; } > "$TMP"
+  dd if="$TMP" of="$DEV" bs=512 seek="$LBA" conv=fsync status=none
+  sync; rm -f "$TMP"; echo "p3boot: flag set to '$1' (one-shot)"
+}
+read_state() {
+  dd if="$DEV" bs=512 skip="$LBA" count=1 status=none 2>/dev/null | od -An -tx1 -j8 -N1 | tr -d ' \n'
+}
+cmd="${1:-}"; shift || true
+reboot_after=0
+for a in "$@"; do [ "$a" = "--reboot" ] && reboot_after=1; done
+case "$cmd" in
+  usb) write_flag U ;;
+  emmc) write_flag E ;;
+  clear) head -c 512 /dev/zero > "$TMP"; dd if="$TMP" of="$DEV" bs=512 seek="$LBA" conv=fsync status=none; sync; rm -f "$TMP"; echo "p3boot: flag cleared" ;;
+  status)
+    st="$(read_state)"
+    case "$st" in
+      55) echo "p3boot: flag = USB";;
+      45) echo "p3boot: flag = eMMC";;
+      *) echo "p3boot: no flag (default: USB first, then eMMC)";;
+    esac ;;
+  *) usage ;;
+esac
+if [ "$reboot_after" = 1 ] && [ "$cmd" != status ]; then echo "p3boot: rebooting..."; sync; systemctl reboot; fi
