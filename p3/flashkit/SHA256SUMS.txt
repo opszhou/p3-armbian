@@ -1,3 +1,9 @@
 7ff83efe65274c80db792a0899adaec3c069edb56e1482f483861e0c7397c9de  01_gpt_bootarea.img
+46793deea3edbda54f49d5e4b724a9d259b92450f43c8683bf4dc8303c61d4e0  01_gpt_bootarea_l10h.img
+5f743994415744a75ccde39f60cc3f013d6af719c1d6212743abdf0a645b9766  01_gpt_bootarea_l10g.img
 b9c6bda65c738176aef65810451377e3d32af2db0e8c45b726f670f4f605e2f2  04_backup_gpt.img
-02_boot.img 3fbacdd71abb298a... - flash @0x8000
+54b013837c51d9775f40ffb817eedc0dba0a8cc423cd372621ecea8f1556a0db  p3boot
+02_boot.img (L9) 3fbacdd71abb298a... - flash @0x8000 (Releases)
+02_boot.img (L10) 10c7040192ab02e0... - flash @0x8000 (Releases, tag flashkit_l10)
+03_rootfs.img (L10) eabf759231510e1c... - flash @0xC8000 (Releases, tag flashkit_l10)
+p3_armbian_slim.img (L10) 3c349485ce43fdd4... - flash to USB stick (Releases, tag flashkit_l10)
