@@ -4,6 +4,6 @@
 b9c6bda65c738176aef65810451377e3d32af2db0e8c45b726f670f4f605e2f2  04_backup_gpt.img
 54b013837c51d9775f40ffb817eedc0dba0a8cc423cd372621ecea8f1556a0db  p3boot
 02_boot.img (L9) 3fbacdd71abb298a... - flash @0x8000 (Releases)
-02_boot.img (L10) 9cbaf7c4c7908cf5... - flash @0x8000 (Releases, tag flashkit_l10)
+02_boot.img (L10) 0c20966fe255adf3... - flash @0x8000 (Releases, tag flashkit_l10)
 03_rootfs.img (L10) eabf759231510e1c... - flash @0xC8000 (Releases, tag flashkit_l10)
-p3_armbian_slim.img (L10) 8d76ef4efcb98af4... - flash to USB stick (Releases, tag flashkit_l10)
+p3_armbian_slim.img (L10) f2827cfebad67750... - flash to USB stick (Releases, tag flashkit_l10)
