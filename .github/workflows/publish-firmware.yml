@@ -137,7 +137,8 @@ jobs:
         run: |
           set -e
           SPLIT_DIR="/builder/split"
-          mkdir -p "${SPLIT_DIR}" build/output/split
+          sudo mkdir -p "${SPLIT_DIR}" build/output/split
+          sudo chown -R $(id -u):$(id -g) /builder
 
           # Source: the rebuilt full image (gzip)
           FULL_GZ=$(ls ${PACKAGED_OUTPUTPATH}/*.img.gz | head -n 1)
@@ -147,44 +148,76 @@ jobs:
           # Unzip to raw image
           gzip -dc "${FULL_GZ}" > "${SPLIT_DIR}/full.img"
 
-          # Read partition layout dynamically
-          LOOP=$(losetup -Pf --show "${SPLIT_DIR}/full.img")
-          sfdisk -d "${LOOP}" > /tmp/layout || true
+          # Attach loop (runner needs sudo for loop devices)
+          LOOP=$(sudo losetup -Pf --show "${SPLIT_DIR}/full.img")
+          cleanup() { sudo losetup -d ${LOOP} 2>/dev/null || true; }
+          trap cleanup EXIT
+          sudo sfdisk -d "${LOOP}" > /tmp/layout || true
           echo "--- partition table ---"
           cat /tmp/layout
 
-          P1_START=$(grep -oP 'img1\s*:\s*start=\s*\K\d+' /tmp/layout)
-          P1_SIZE=$(grep -oP 'img1\s*:.*?size=\s*\K\d+' /tmp/layout)
-          P2_START=$(grep -oP 'img2\s*:\s*start=\s*\K\d+' /tmp/layout)
-          P2_SIZE=$(grep -oP 'img2\s*:.*?size=\s*\K\d+' /tmp/layout)
-          [[ -n "${P1_START}" && -n "${P2_START}" ]] || { echo "Error: partition parse failed."; losetup -d ${LOOP}; exit 1; }
+          # Parse partitions (partition name may be p1/1 depending on tooling)
+          P1_START=$(grep -oP '^(?:\S+)?p?1\s*:\s*start=\s*\K\d+' /tmp/layout | head -1)
+          P1_SIZE=$(grep  -P '^(?:\S+)?p?1\s*:' /tmp/layout | grep -oP 'size=\s*\K\d+' | head -1)
+          P2_START=$(grep -oP '^(?:\S+)?p?2\s*:\s*start=\s*\K\d+' /tmp/layout | head -1)
+          P2_SIZE=$(grep  -P '^(?:\S+)?p?2\s*:' /tmp/layout | grep -oP 'size=\s*\K\d+' | head -1)
+          [[ -n "${P1_START}" && -n "${P2_START}" ]] || { echo "Error: partition parse failed."; exit 1; }
           echo "p1: start=${P1_START} size=${P1_SIZE} | p2: start=${P2_START} size=${P2_SIZE}"
 
-          # 02_boot.img / 03_rootfs.img — raw partition images
-          dd if=${LOOP} of="${SPLIT_DIR}/02_boot.img" bs=512 skip=${P1_START} count=${P1_SIZE} conv=fsync status=none
-          dd if=${LOOP} of="${SPLIT_DIR}/03_rootfs.img" bs=512 skip=${P2_START} count=${P2_SIZE} conv=fsync status=none
-          losetup -d ${LOOP}
+          # Extract partitions, then content-verify which one is boot / rootfs
+          sudo dd if=${LOOP} of="${SPLIT_DIR}/p1.img" bs=512 skip=${P1_START} count=${P1_SIZE} status=none
+          sudo dd if=${LOOP} of="${SPLIT_DIR}/p2.img" bs=512 skip=${P2_START} count=${P2_SIZE} status=none
+          sudo losetup -d ${LOOP}; trap - EXIT
 
-          # Sanity check: both partition images mount
-          M=/mnt/split_check; mkdir -p ${M}
-          mount -o loop,ro "${SPLIT_DIR}/02_boot.img" ${M}
-          ls ${M}/extlinux/extlinux.conf > /dev/null && echo "02_boot mount OK"
-          umount ${M}
-          mount -o loop,ro "${SPLIT_DIR}/03_rootfs.img" ${M}
-          ls ${M}/etc/os-release > /dev/null && echo "03_rootfs mount OK"
-          ls ${M}/lib/modules/ && echo "modules OK"
-          umount ${M}
+          M=/mnt/split_check; sudo mkdir -p ${M}
+          is_boot()  { sudo mount -o ro "$1" ${M} 2>/dev/null && sudo ls ${M}/extlinux/extlinux.conf >/dev/null 2>&1 && sudo umount ${M}; }
+          is_root()  { sudo mount -o ro "$1" ${M} 2>/dev/null && sudo ls ${M}/etc/os-release >/dev/null 2>&1 && sudo umount ${M}; }
+          if is_boot "${SPLIT_DIR}/p1.img"; then
+              sudo mv ${SPLIT_DIR}/p1.img ${SPLIT_DIR}/02_boot.img
+              sudo mv ${SPLIT_DIR}/p2.img ${SPLIT_DIR}/03_rootfs.img
+          elif is_boot "${SPLIT_DIR}/p2.img"; then
+              sudo mv ${SPLIT_DIR}/p2.img ${SPLIT_DIR}/02_boot.img
+              sudo mv ${SPLIT_DIR}/p1.img ${SPLIT_DIR}/03_rootfs.img
+          else
+              echo "Error: cannot identify boot partition."; exit 1
+          fi
+          echo "02_boot mount OK";  sudo mount -o ro "${SPLIT_DIR}/02_boot.img" ${M} && sudo ls ${M}/extlinux/extlinux.conf && sudo umount ${M}
+          echo "03_rootfs mount OK"; sudo mount -o ro "${SPLIT_DIR}/03_rootfs.img" ${M} && sudo ls ${M}/lib/modules/ && sudo ls ${M}/etc/os-release && sudo umount ${M}
 
-          # 01 bootloader images (static, from repo) + slim full image + checksums
-          cp -v p3/flashkit/01_gpt_bootarea_l10h.img p3/flashkit/01_gpt_bootarea_l10g.img p3/flashkit/p3boot "${SPLIT_DIR}/"
-          cp "${FULL_GZ}" "${SPLIT_DIR}/p3_armbian_slim.img.gz"
+          # 02/03 ownership for later steps
+          sudo chown $(id -u):$(id -g) ${SPLIT_DIR}/02_boot.img ${SPLIT_DIR}/03_rootfs.img
 
+          # ---- slim: assemble flashkit-layout full image (01 u-boot/GPT area + boot + rootfs) ----
+          BOOT_START=32768; ROOT_START=819200
+          BOOT_SECS=786432                      # 384MB, same as flashkit GPT
+          ROOT_SECS=$(stat -c%s ${SPLIT_DIR}/03_rootfs.img | awk '{printf "%d", $1/512 + ($1%512?1:0)}')
+          SLIM_SECS=$((ROOT_START + ROOT_SECS + 33))
+          truncate -s $((SLIM_SECS * 512)) ${SPLIT_DIR}/slim.raw
+          dd if=p3/flashkit/01_gpt_bootarea_l10h.img of=${SPLIT_DIR}/slim.raw conv=notrunc status=none
+          dd if=${SPLIT_DIR}/02_boot.img  of=${SPLIT_DIR}/slim.raw bs=512 seek=${BOOT_START} conv=notrunc status=none
+          dd if=${SPLIT_DIR}/03_rootfs.img of=${SPLIT_DIR}/slim.raw bs=512 seek=${ROOT_START} conv=notrunc status=none
+          # Rewrite GPT to match the assembled size (backup GPT lands at file end)
           cd "${SPLIT_DIR}"
+          sfdisk --force slim.raw <<PTABLE
+          label: gpt
+          unit: sectors
+          slim.raw1 : start=${BOOT_START}, size=${BOOT_SECS}, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="boot"
+          slim.raw2 : start=${ROOT_START}, size=${ROOT_SECS}, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="rootfs"
+          PTABLE
+          sfdisk -d slim.raw
+          echo "slim assembled: $(du -m slim.raw | cut -f1)MB (rootfs ${ROOT_SECS} sectors)"
+          gzip -k9 slim.raw && mv slim.raw.gz p3_armbian_slim.img.gz && rm slim.raw
+
+          # ---- 01 bootloader pair (static, from repo) + checksums ----
+          cp -v "${GITHUB_WORKSPACE}/p3/flashkit/01_gpt_bootarea_l10h.img" \
+                "${GITHUB_WORKSPACE}/p3/flashkit/01_gpt_bootarea_l10g.img" \
+                "${GITHUB_WORKSPACE}/p3/flashkit/p3boot" ./
+
           sha256sum 01_gpt_bootarea_l10h.img 01_gpt_bootarea_l10g.img p3boot 02_boot.img 03_rootfs.img p3_armbian_slim.img.gz > SHA256SUMS.txt
           cat SHA256SUMS.txt
           cd - > /dev/null
 
-          cp -f "${SPLIT_DIR}"/* build/output/split/
+          cp -f "${SPLIT_DIR}"/01_gpt_bootarea_l10h.img "${SPLIT_DIR}"/01_gpt_bootarea_l10g.img "${SPLIT_DIR}"/p3boot "${SPLIT_DIR}"/02_boot.img "${SPLIT_DIR}"/03_rootfs.img "${SPLIT_DIR}"/p3_armbian_slim.img.gz "${SPLIT_DIR}"/SHA256SUMS.txt build/output/split/
           echo "FIRMWARE_TAG=firmware_$(date +%Y.%m)" >> ${GITHUB_ENV}
           echo "status=success" >> ${GITHUB_OUTPUT}
 
