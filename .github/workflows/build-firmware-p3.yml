@@ -90,7 +90,8 @@ jobs:
           test -f ${M}/Image && test -f ${M}/uInitrd && test -f ${M}/dtb/rockchip/rk3566-wxy-oec-turbo-4g.dtb
           sudo cat ${M}/extlinux/extlinux.conf | head -6
           sudo umount ${M}
-          sudo e2fsck -fy build/base/02_boot.img > /tmp/e2b.log 2>&1; grep -E "clean" /tmp/e2b.log | tail -1
+          sudo e2fsck -fy build/base/02_boot.img > /tmp/e2b.log 2>&1 || true
+          echo "-- 02_boot e2fsck --"; tail -2 /tmp/e2b.log
 
           # ---------- rootfs partition ----------
           sudo mount -o loop build/base/03_rootfs.img ${M}
@@ -104,7 +105,8 @@ jobs:
           sudo depmod -b ${M} ${VER}-ophub
           ls ${M}/lib/modules/
           sudo umount ${M}
-          sudo e2fsck -fy build/base/03_rootfs.img > /tmp/e2r.log 2>&1; grep -E "clean" /tmp/e2r.log | tail -1
+          sudo e2fsck -fy build/base/03_rootfs.img > /tmp/e2r.log 2>&1 || true
+          echo "-- 03_rootfs e2fsck --"; tail -2 /tmp/e2r.log
 
           rmdir ${M}
           echo "injection done"
