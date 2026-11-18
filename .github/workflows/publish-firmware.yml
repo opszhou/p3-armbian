@@ -68,16 +68,22 @@ jobs:
         run: |
           mkdir -p build/output/images
 
-          latest_version=$(curl -s \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              https://api.github.com/repos/${{ github.repository }}/releases?per_page=30 | \
-              jq -r '[.[] | select(.tag_name | contains("Armbian_"))] |
-              map(.assets[] | select(.name | contains("p3-wxy4") and endswith(".img.gz"))) |
-              sort_by(.updated_at) |
-              reverse |
-              .[0] |
-              {data: .updated_at, url: .url, name: .name}')
+          latest_version=""
+          for attempt in 1 2 3 4 5; do
+              latest_version=$(curl -fsSL \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                  https://api.github.com/repos/${{ github.repository }}/releases?per_page=30 | \
+                  jq -r '[.[] | select(.tag_name | contains("Armbian_"))] |
+                  map(.assets[] | select(.name | contains("p3-wxy4") and endswith(".img.gz"))) |
+                  sort_by(.updated_at) |
+                  reverse |
+                  .[0] |
+                  {data: .updated_at, url: .url, name: .name}' 2>/dev/null || true)
+              [[ -n "${latest_version}" && "${latest_version}" != "null" ]] && break
+              echo "Resolve attempt ${attempt} failed, retrying in 30s..."
+              sleep 30
+          done
 
           [[ -z "${latest_version}" || "${latest_version}" == "null" ]] && {
               echo "Error: Failed to resolve p3-wxy4 image download URL."
