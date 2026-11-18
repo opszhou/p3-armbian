@@ -154,7 +154,7 @@ jobs:
         if: ${{ steps.pack.outputs.status == 'success' && !cancelled() }}
         with:
           tag: ${{ env.FIRMWARE_TAG }}
-          artifacts: build/output/01_gpt_bootarea_l10h.img, build/output/01_gpt_bootarea_l10g.img, build/output/p3boot, build/output/02_boot.img, build/output/03_rootfs.img, build/output/p3_armbian_slim.img.gz, build/output/SHA256SUMS.txt
+          artifacts: build/output/*
           allow_updates: true
           remove_artifacts: false
           replaces_artifacts: true
