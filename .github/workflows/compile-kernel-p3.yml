@@ -213,6 +213,7 @@ jobs:
           kernel_sign: ${{ inputs.kernel_sign }}
           kernel_config: ${{ inputs.kernel_config }}
           kernel_toolchain: ${{ inputs.kernel_toolchain }}
+          kernel_patch: p3/kernel-patches
           auto_patch: true
           ccache_clear: ${{ inputs.ccache_clear }}
           docker_hostpath: /builder
