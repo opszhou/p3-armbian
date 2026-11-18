@@ -1,0 +1,19 @@
+diff --git a/dwmac-rk-tool.c b/dwmac-rk-tool-patched.c
+index 1e3f001..b174571 100644
+--- a/dwmac-rk-tool.c
++++ b/dwmac-rk-tool-patched.c
+@@ -886,6 +886,14 @@ static int dwmac_rk_delayline_scan(struct stmmac_priv *priv,
+ 			if (dwmac_rk_delayline_is_valid(lb_priv, tx_mid, rx_mid)) {
+ 				lb_priv->final_tx = tx_mid;
+ 				lb_priv->final_rx = rx_mid;
++				/*
++				 * Apply the optimal delayline at runtime right
++				 * after a successful scan, so the MAC picks it
++				 * up on re-init without a dtb change or reboot.
++				 */
++				dwmac_rk_set_rgmii_delayline(priv,
++							     lb_priv->final_tx,
++							     lb_priv->final_rx);
+ 				ret = 0;
+ 			}
+ 		}

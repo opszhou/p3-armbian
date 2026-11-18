@@ -1,0 +1,40 @@
+diff --git a/orig.dts b/patched.dts
+index b92db60..6edecee 100644
+--- a/orig.dts
++++ b/patched.dts
+@@ -300,11 +300,11 @@
+ 
+ 
+ &display_subsystem {
+-    status = "disabled";
++    status = "okay";
+ };
+ 
+ &hdmi {
+-	status = "disabled";
++	status = "okay";
+ 	rockchip,phy-table =
+ 		<92812500  0x8009 0x0000 0x0270>,
+ 		<165000000 0x800b 0x0000 0x026d>,
+@@ -319,6 +319,10 @@
+ 	status = "okay";
+ };
+ 
++&i2s0_8ch {
++	status = "okay";
++};
++
+ 
+ &i2c0 {
+ 	status = "disabled";
+@@ -598,8 +602,8 @@
+ 		     &gmac1m1_rgmii_bus
+ 		     &gmac1m1_clkinout>;
+ 
+-	tx_delay = <0x4f>;
+-	rx_delay = <0x2d>;
++	tx_delay = <0x22>;
++	rx_delay = <0x15>;
+ 
+ 	phy-handle = <&rgmii_phy1>;
+ 	status = "okay";

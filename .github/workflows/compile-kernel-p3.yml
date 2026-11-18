@@ -11,11 +11,12 @@ on:
   workflow_dispatch:
     inputs:
       kernel_source:
-        description: "Select the kernel source"
+        description: "Select the kernel source (owner/repo@branch)"
         required: false
-        default: "ophub"
+        default: "unifreq/linux-6.12.y-rockchip@main"
         type: choice
         options:
+          - unifreq/linux-6.12.y-rockchip@main
           - unifreq
           - ophub
       kernel_version:
@@ -174,7 +175,13 @@ jobs:
         id: kernelhash
         run: |
           # Get the latest source hash from the kernel repository
-          api_url="https://api.github.com/repos/${{ inputs.kernel_source }}/linux-${{ matrix.kernel_version }}/git/ref/heads/main"
+          # kernel_source may be "owner", "owner/repo" or "owner/repo@branch"
+          kernel_repo="${{ inputs.kernel_source }}"
+          kernel_repo="${kernel_repo%%@*}"
+          case "${kernel_repo}" in
+            */*) api_url="https://api.github.com/repos/${kernel_repo}/git/ref/heads/main" ;;
+            *)   api_url="https://api.github.com/repos/${kernel_repo}/linux-${{ matrix.kernel_version }}/git/ref/heads/main" ;;
+          esac
           source_hash=$(curl -fsSL -m 20 \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
@@ -206,6 +213,7 @@ jobs:
           kernel_sign: ${{ inputs.kernel_sign }}
           kernel_config: ${{ inputs.kernel_config }}
           kernel_toolchain: ${{ inputs.kernel_toolchain }}
+          auto_patch: true
           ccache_clear: ${{ inputs.ccache_clear }}
           docker_hostpath: /builder
           docker_image: ophub/armbian-${{ inputs.docker_image }}:arm64
