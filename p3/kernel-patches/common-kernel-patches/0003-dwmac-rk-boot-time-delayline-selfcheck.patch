@@ -1,5 +1,5 @@
 diff --git a/dwmac-rk-tool.c b/tool-p3.c
-index 1e3f001..15f249d 100644
+index 1e3f001..acb1b67 100644
 --- a/drivers/net/ethernet/stmicro/stmmac/dwmac-rk-tool.c
 +++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-rk-tool.c
 @@ -12,6 +12,7 @@
@@ -10,7 +10,7 @@ index 1e3f001..15f249d 100644
  #include <linux/regmap.h>
  #include <linux/phy.h>
  #include <linux/udp.h>
-@@ -1502,6 +1503,104 @@ static ssize_t phy_lb_scan_store(struct device *dev,
+@@ -1502,6 +1503,121 @@ static ssize_t phy_lb_scan_store(struct device *dev,
  }
  static DEVICE_ATTR_WO(phy_lb_scan);
  
@@ -35,8 +35,25 @@ index 1e3f001..15f249d 100644
 +	struct dwmac_rk_selfcheck *sc =
 +		container_of(w, struct dwmac_rk_selfcheck, work.work);
 +	struct stmmac_priv *priv = sc->priv;
++	struct net_device *ndev = priv->dev;
 +	struct dwmac_rk_lb_priv *lb_priv;
 +	int ret;
++
++	/*
++	 * The loopback test needs the interface up and the PHY attached
++	 * (priv->dev->phydev is only set by ndo_open). NetworkManager may
++	 * bring the interface up well after probe, so wait for it.
++	 */
++	if (!ndev || !netif_running(ndev) || !ndev->phydev) {
++		if (sc->retries-- > 0) {
++			pr_info("dwmac-rk: selfcheck postponed, interface not ready (retry %d)\n",
++				sc->retries);
++			schedule_delayed_work(&sc->work, 5 * HZ);
++			return;
++		}
++		pr_info("dwmac-rk: selfcheck skipped, interface never came up\n");
++		return;
++	}
 +
 +	lb_priv = kzalloc(sizeof(*lb_priv), GFP_KERNEL);
 +	if (!lb_priv)
