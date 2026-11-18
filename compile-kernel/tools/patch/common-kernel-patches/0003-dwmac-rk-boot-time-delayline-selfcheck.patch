@@ -1,0 +1,154 @@
+diff --git a/dwmac-rk-tool.c b/tool-p3.c
+index 1e3f001..15f249d 100644
+--- a/dwmac-rk-tool.c
++++ b/tool-p3.c
+@@ -12,6 +12,7 @@
+ #include <linux/of.h>
+ #include <linux/slab.h>
+ #include <linux/prefetch.h>
++#include <linux/workqueue.h>
+ #include <linux/regmap.h>
+ #include <linux/phy.h>
+ #include <linux/udp.h>
+@@ -1502,6 +1503,104 @@ static ssize_t phy_lb_scan_store(struct device *dev,
+ }
+ static DEVICE_ATTR_WO(phy_lb_scan);
+ 
++
++/*
++ * Boot-time delayline selfcheck:
++ * 1. run one PHY loopback packet test with the delayline values from DTB
++ * 2. PASS -> nothing to do
++ * 3. FAIL -> cross-scan for the optimal delayline and apply it at runtime
++ *
++ * The loopback test is PHY-internal, so this works (and only intervenes)
++ * regardless of whether the external network is available.
++ */
++struct dwmac_rk_selfcheck {
++	struct delayed_work work;
++	struct stmmac_priv *priv;
++	int retries;
++};
++
++static void dwmac_rk_selfcheck_run(struct work_struct *w)
++{
++	struct dwmac_rk_selfcheck *sc =
++		container_of(w, struct dwmac_rk_selfcheck, work.work);
++	struct stmmac_priv *priv = sc->priv;
++	struct dwmac_rk_lb_priv *lb_priv;
++	int ret;
++
++	lb_priv = kzalloc(sizeof(*lb_priv), GFP_KERNEL);
++	if (!lb_priv)
++		return;
++
++	lb_priv->sysfs = 1;
++	lb_priv->type = LOOPBACK_TYPE_PHY;
++	lb_priv->speed = 1000;
++	lb_priv->scan = 0;
++
++	ret = dwmac_rk_loopback_run(priv, lb_priv);
++	kfree(lb_priv);
++
++	if (ret == -EAGAIN && sc->retries-- > 0) {
++		pr_info("dwmac-rk: selfcheck postponed, phy negotiation pending (retry %d)\n",
++			sc->retries);
++		schedule_delayed_work(&sc->work, 5 * HZ);
++		return;
++	}
++
++	if (!ret) {
++		pr_info("dwmac-rk: delayline selfcheck PASS\n");
++		return;
++	}
++
++	pr_warn("dwmac-rk: delayline selfcheck FAIL (%d), running cross-scan\n", ret);
++
++	lb_priv = kzalloc(sizeof(*lb_priv), GFP_KERNEL);
++	if (!lb_priv)
++		return;
++
++	lb_priv->sysfs = 0;
++	lb_priv->type = LOOPBACK_TYPE_PHY;
++	lb_priv->speed = 1000;
++	lb_priv->scan = 1;
++
++	ret = dwmac_rk_loopback_run(priv, lb_priv);
++	kfree(lb_priv);
++
++	if (!ret)
++		pr_info("dwmac-rk: cross-scan found optimal delayline, applied at runtime\n");
++	else
++		pr_err("dwmac-rk: cross-scan failed (%d), keeping dtb values\n", ret);
++}
++
++static void dwmac_rk_selfcheck_release(void *data)
++{
++	struct dwmac_rk_selfcheck *sc = data;
++
++	cancel_delayed_work_sync(&sc->work);
++	kfree(sc);
++}
++
++int dwmac_rk_schedule_selfcheck(struct device *dev)
++{
++	struct net_device *ndev = dev_get_drvdata(dev);
++	struct stmmac_priv *priv = netdev_priv(ndev);
++	struct dwmac_rk_selfcheck *sc;
++
++	if (dwmac_rk_get_phy_interface(priv) != PHY_INTERFACE_MODE_RGMII)
++		return 0;
++
++	sc = kzalloc(sizeof(*sc), GFP_KERNEL);
++	if (!sc)
++		return -ENOMEM;
++
++	sc->priv = priv;
++	sc->retries = 6;
++	INIT_DELAYED_WORK(&sc->work, dwmac_rk_selfcheck_run);
++	schedule_delayed_work(&sc->work, 8 * HZ);
++
++	return devm_add_action_or_reset(dev, dwmac_rk_selfcheck_release, sc);
++}
++EXPORT_SYMBOL_GPL(dwmac_rk_schedule_selfcheck);
++
+ int dwmac_rk_create_loopback_sysfs(struct device *device)
+ {
+ 	int ret;
+diff --git a/dwmac-rk-tool.h b/toolh-p3.h
+index 5b87c27..980ba83 100644
+--- a/dwmac-rk-tool.h
++++ b/toolh-p3.h
+@@ -16,6 +16,7 @@ int dwmac_rk_get_phy_interface(struct stmmac_priv *priv);
+ #ifdef CONFIG_DWMAC_ROCKCHIP_TOOL
+ int dwmac_rk_create_loopback_sysfs(struct device *dev);
+ int dwmac_rk_remove_loopback_sysfs(struct device *device);
++int dwmac_rk_schedule_selfcheck(struct device *dev);
+ #else
+ static inline int dwmac_rk_create_loopback_sysfs(struct device *dev)
+ {
+@@ -26,6 +27,11 @@ static inline int dwmac_rk_remove_loopback_sysfs(struct device *device)
+ {
+ 	return 0;
+ }
++
++static inline int dwmac_rk_schedule_selfcheck(struct device *dev)
++{
++	return 0;
++}
+ #endif
+ 
+ #ifdef CONFIG_DWMAC_RK_AUTO_DELAYLINE
+diff --git a/dwmac-rk.c b/rk-p3.c
+index d760ddd..6f9158b 100644
+--- a/dwmac-rk.c
++++ b/rk-p3.c
+@@ -3797,6 +3797,8 @@ static int rk_gmac_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		goto err_gmac_powerdown;
+ 
++	dwmac_rk_schedule_selfcheck(&pdev->dev);
++
+ 	return 0;
+ 
+ err_gmac_powerdown:
