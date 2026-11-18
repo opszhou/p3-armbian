@@ -4,7 +4,7 @@
 # Copyright (C) 2021 https://github.com/ophub/kernel
 #==========================================================================
 
-name: Compile P3 kernel (no PSCI checker)
+name: 编译内核 (Build Kernel)
 
 on:
   repository_dispatch:
@@ -223,7 +223,7 @@ jobs:
         uses: ophub/upload-to-releases@main
         if: ${{ env.PACKAGED_STATUS == 'success' && !cancelled() }}
         with:
-          tag: kernel_p3
+          tag: kernel_stable
           artifacts: ${{ env.PACKAGED_OUTPUTPATH }}/*
           allow_updates: true
           remove_artifacts: false

@@ -20,7 +20,7 @@
 # (set_release / armbian_board / armbian_kernel).
 #==========================================================================
 
-name: Sync upstream and build p3-wxy4
+name: 合并官方 (Sync Upstream)
 
 on:
   schedule:
@@ -135,7 +135,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh workflow run build-armbian-arm64-server-image.yml \
+          gh workflow run build-p3-image.yml \
             --ref main \
             -f set_release=noble \
             -f armbian_board=p3-wxy4 \
