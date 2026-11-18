@@ -95,6 +95,20 @@ jobs:
                -o "build/output/images/${armbian_filename}"
           [[ "${?}" -ne "0" ]] && echo "Error: Download failed." && exit 1
 
+          # Resolve the concrete kernel version from the kernel_stable release
+          KERNEL_VER=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${{ github.repository }}/releases/tags/kernel_stable | \
+              jq -r '.assets[] | select(.name | test("^6\\.[0-9]+\\.[0-9]+\\.tar\\.gz$")) | .name' | \
+              head -n 1 | sed 's/\.tar\.gz$//')
+          [[ -z "${KERNEL_VER}" || "${KERNEL_VER}" == "null" ]] && {
+              echo "Error: Failed to resolve kernel version from kernel_stable."
+              exit 1
+          }
+          echo "Patched kernel version: ${KERNEL_VER}"
+          echo "KERNEL_VER=${KERNEL_VER}" >> ${GITHUB_ENV}
+
           echo "status=success" >> ${GITHUB_OUTPUT}
 
       - name: Rebuild with patched kernel
@@ -104,8 +118,8 @@ jobs:
           build_target: armbian
           armbian_path: build/output/images/*.img.gz
           armbian_board: p3-wxy4
-          armbian_kernel: 6.12.y_6.18.y
-          auto_kernel: true
+          armbian_kernel: ${{ env.KERNEL_VER }}
+          auto_kernel: false
           kernel_repo: opszhou/p3-armbian
           kernel_usage: stable
           armbian_fstype: ext4
