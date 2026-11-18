@@ -1,7 +1,7 @@
 diff --git a/orig.dts b/patched.dts
 index b92db60..6edecee 100644
---- a/orig.dts
-+++ b/patched.dts
+--- a/arch/arm64/boot/dts/rockchip/rk3566-wxy-oec-turbo-4g.dts
++++ b/arch/arm64/boot/dts/rockchip/rk3566-wxy-oec-turbo-4g.dts
 @@ -300,11 +300,11 @@
  
  

@@ -1,7 +1,7 @@
 diff --git a/dwmac-rk-tool.c b/dwmac-rk-tool-patched.c
 index 1e3f001..b174571 100644
---- a/dwmac-rk-tool.c
-+++ b/dwmac-rk-tool-patched.c
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac-rk-tool.c
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-rk-tool.c
 @@ -886,6 +886,14 @@ static int dwmac_rk_delayline_scan(struct stmmac_priv *priv,
  			if (dwmac_rk_delayline_is_valid(lb_priv, tx_mid, rx_mid)) {
  				lb_priv->final_tx = tx_mid;

@@ -1,7 +1,7 @@
 diff --git a/dwmac-rk-tool.c b/tool-p3.c
 index 1e3f001..15f249d 100644
---- a/dwmac-rk-tool.c
-+++ b/tool-p3.c
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac-rk-tool.c
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-rk-tool.c
 @@ -12,6 +12,7 @@
  #include <linux/of.h>
  #include <linux/slab.h>
@@ -117,8 +117,8 @@ index 1e3f001..15f249d 100644
  	int ret;
 diff --git a/dwmac-rk-tool.h b/toolh-p3.h
 index 5b87c27..980ba83 100644
---- a/dwmac-rk-tool.h
-+++ b/toolh-p3.h
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac-rk-tool.h
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-rk-tool.h
 @@ -16,6 +16,7 @@ int dwmac_rk_get_phy_interface(struct stmmac_priv *priv);
  #ifdef CONFIG_DWMAC_ROCKCHIP_TOOL
  int dwmac_rk_create_loopback_sysfs(struct device *dev);
@@ -141,8 +141,8 @@ index 5b87c27..980ba83 100644
  #ifdef CONFIG_DWMAC_RK_AUTO_DELAYLINE
 diff --git a/dwmac-rk.c b/rk-p3.c
 index d760ddd..6f9158b 100644
---- a/dwmac-rk.c
-+++ b/rk-p3.c
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac-rk.c
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-rk.c
 @@ -3797,6 +3797,8 @@ static int rk_gmac_probe(struct platform_device *pdev)
  	if (ret)
  		goto err_gmac_powerdown;
