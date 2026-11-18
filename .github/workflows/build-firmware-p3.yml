@@ -1,0 +1,171 @@
+name: 构建固件 (Build Firmware)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: "内核版本（留空 = 自动取 kernel_stable 最新）"
+        required: false
+        default: ""
+        type: string
+      base_tag:
+        description: "rootfs/boot 基座来源 Release（02/03 的内核需与 kernel_version 同代）"
+        required: false
+        default: "flashkit_l10"
+        type: string
+  repository_dispatch:
+    types: [kernel-built]
+
+env:
+  KERNEL_REPO: ${{ github.repository }}
+
+jobs:
+  build-firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve kernel version
+        id: ver
+        run: |
+          if [[ -n "${{ inputs.kernel_version }}" ]]; then
+            KERNEL_VER="${{ inputs.kernel_version }}"
+          else
+            KERNEL_VER=$(curl -fsSL --retry 5 \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${KERNEL_REPO}/releases/tags/kernel_stable | \
+              jq -r '.assets[] | select(.name | test("^6\\.[0-9]+\\.[0-9]+\\.tar\\.gz$")) | .name' | \
+              head -n 1 | sed 's/\.tar\.gz$//')
+          fi
+          [[ -n "${KERNEL_VER}" && "${KERNEL_VER}" != "null" ]] || { echo "Error: kernel version resolve failed."; exit 1; }
+          echo "KERNEL_VER=${KERNEL_VER}" >> ${GITHUB_ENV}
+          echo "Kernel version: ${KERNEL_VER}"
+
+      - name: Download kernel bundle
+        run: |
+          mkdir -p build/kernel && cd build/kernel
+          curl -fsSL --retry 5 -C - \
+            -H "Accept: application/octet-stream" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://github.com/${KERNEL_REPO}/releases/download/kernel_stable/${KERNEL_VER}.tar.gz" \
+            -o ${KERNEL_VER}.tar.gz
+          tar xzf ${KERNEL_VER}.tar.gz
+          cd ${KERNEL_VER} && sha256sum -c sha256sums
+          echo "bundle files:"; ls -l
+
+      - name: Download base firmware (02_boot + 03_rootfs)
+        run: |
+          mkdir -p build/base && cd build/base
+          BASE_TAG="${{ inputs.base_tag }}"
+          for f in 02_boot.img 03_rootfs.img; do
+            curl -fsSL --retry 5 -C - \
+              -H "Accept: application/octet-stream" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://github.com/${KERNEL_REPO}/releases/download/${BASE_TAG}/${f}" \
+              -o ${f}
+          done
+          ls -l
+
+      - name: Inject kernel into base firmware
+        run: |
+          set -e
+          VER="${KERNEL_VER}"
+          BUND=build/kernel/${VER}
+          M=$(mktemp -d)
+
+          # ---------- boot partition ----------
+          sudo mount -o loop build/base/02_boot.img ${M}
+          # 清掉旧内核文件，只保留 extlinux 引导配置
+          sudo find ${M} -maxdepth 1 -mindepth 1 ! -name 'extlinux' -exec rm -rf {} +
+          sudo tar xzf ${BUND}/boot-${VER}-ophub.tar.gz -C ${M}
+          # dtb：替换 dtb/rockchip 内容（含 wxy 板 dtb 与 overlay）
+          sudo rm -rf ${M}/dtb/rockchip && sudo mkdir -p ${M}/dtb/rockchip
+          sudo tar xzf ${BUND}/dtb-rockchip-${VER}-ophub.tar.gz -C ${M}/dtb/rockchip
+          # 归位 armbian extlinux 约定的文件名
+          sudo mv ${M}/vmlinuz-${VER}-ophub ${M}/Image
+          sudo mv ${M}/uInitrd-${VER}-ophub ${M}/uInitrd
+          sudo rm -f ${M}/initrd.img-${VER}-ophub ${M}/config-${VER}-ophub ${M}/System.map-${VER}-ophub
+          test -f ${M}/Image && test -f ${M}/uInitrd && test -f ${M}/dtb/rockchip/rk3566-wxy-oec-turbo-4g.dtb
+          sudo cat ${M}/extlinux/extlinux.conf | head -6
+          sudo umount ${M}
+          sudo e2fsck -fy build/base/02_boot.img > /tmp/e2b.log 2>&1; grep -E "clean" /tmp/e2b.log | tail -1
+
+          # ---------- rootfs partition ----------
+          sudo mount -o loop build/base/03_rootfs.img ${M}
+          # 旧内核模块清掉（只留新版本）
+          sudo find ${M}/lib/modules -maxdepth 1 -mindepth 1 -type d ! -name "${VER}-ophub" -exec rm -rf {} +
+          sudo rm -rf ${M}/lib/modules/${VER}-ophub
+          sudo tar xzf ${BUND}/modules-${VER}-ophub.tar.gz -C ${M}/lib/modules
+          # 头文件（可选件，供后续在线编译）
+          sudo mkdir -p ${M}/usr/src/linux-headers-${VER}-ophub
+          sudo tar xzf ${BUND}/header-${VER}-ophub.tar.gz -C ${M}/usr/src/linux-headers-${VER}-ophub
+          sudo depmod -b ${M} ${VER}-ophub
+          ls ${M}/lib/modules/
+          sudo umount ${M}
+          sudo e2fsck -fy build/base/03_rootfs.img > /tmp/e2r.log 2>&1; grep -E "clean" /tmp/e2r.log | tail -1
+
+          rmdir ${M}
+          echo "injection done"
+
+      - name: Assemble firmware set (01/02/03/slim + SHA256SUMS)
+        run: |
+          set -e
+          OUT=build/output; mkdir -p ${OUT}
+          cp build/base/02_boot.img build/base/03_rootfs.img ${OUT}/
+          cp p3/flashkit/01_gpt_bootarea_l10h.img p3/flashkit/01_gpt_bootarea_l10g.img p3/flashkit/p3boot ${OUT}/
+
+          # ---- slim：flashkit 布局整盘镜像（01 引导区 + boot@32768 + rootfs@819200）----
+          BOOT_START=32768; ROOT_START=819200; BOOT_SECS=786432
+          ROOT_SECS=$(stat -c%s ${OUT}/03_rootfs.img | awk '{printf "%d", $1/512 + ($1%512?1:0)}')
+          SLIM_SECS=$((ROOT_START + ROOT_SECS + 33))
+          truncate -s $((SLIM_SECS * 512)) ${OUT}/slim.raw
+          dd if=p3/flashkit/01_gpt_bootarea_l10h.img of=${OUT}/slim.raw conv=notrunc status=none
+          dd if=${OUT}/02_boot.img  of=${OUT}/slim.raw bs=512 seek=${BOOT_START} conv=notrunc status=none
+          dd if=${OUT}/03_rootfs.img of=${OUT}/slim.raw bs=512 seek=${ROOT_START} conv=notrunc status=none
+          cd ${OUT}
+          sfdisk --force slim.raw <<PTABLE
+          label: gpt
+          unit: sectors
+          slim.raw1 : start=${BOOT_START}, size=${BOOT_SECS}, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="boot"
+          slim.raw2 : start=${ROOT_START}, size=${ROOT_SECS}, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="rootfs"
+          PTABLE
+          sfdisk -d slim.raw
+          echo "slim: $(du -m slim.raw | cut -f1)MB (rootfs ${ROOT_SECS} sectors)"
+          # sanity: slim 的 p1 应能挂载看到 extlinux
+          LOOP=$(sudo losetup -Pf --show slim.raw)
+          sudo mkdir -p /mnt/slimchk && sudo mount -o ro ${LOOP}p1 /mnt/slimchk
+          sudo ls /mnt/slimchk/extlinux/extlinux.conf /mnt/slimchk/Image /mnt/slimchk/uInitrd > /dev/null && echo "slim p1 OK"
+          sudo umount /mnt/slimchk && sudo losetup -d ${LOOP}
+          gzip -k9 slim.raw && mv slim.raw.gz p3_armbian_slim.img.gz && rm slim.raw
+
+          # ---- 校验清单 ----
+          sha256sum 01_gpt_bootarea_l10h.img 01_gpt_bootarea_l10g.img p3boot 02_boot.img 03_rootfs.img p3_armbian_slim.img.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          echo "FIRMWARE_TAG=firmware_$(date +%Y.%m)" >> ${GITHUB_ENV}
+          echo "status=success" >> ${GITHUB_OUTPUT}
+        id: pack
+
+      - name: Upload firmware set to Release
+        uses: ophub/upload-to-releases@main
+        if: ${{ steps.pack.outputs.status == 'success' && !cancelled() }}
+        with:
+          tag: ${{ env.FIRMWARE_TAG }}
+          artifacts: build/output/01_gpt_bootarea_l10h.img, build/output/01_gpt_bootarea_l10g.img, build/output/p3boot, build/output/02_boot.img, build/output/03_rootfs.img, build/output/p3_armbian_slim.img.gz, build/output/SHA256SUMS.txt
+          allow_updates: true
+          remove_artifacts: false
+          replaces_artifacts: true
+          make_latest: false
+          gh_token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            ### P3 固件套件（CI 构建，内核 ${{ env.KERNEL_VER }}）
+            | 文件 | 用途 |
+            |---|---|
+            | 01_gpt_bootarea_l10h.img / _l10g.img | GPT + L10 引导（二选一：日常 l10h，反复刷机 l10g）`wl 0x0` |
+            | 02_boot.img | boot 分区（内核 Image/uInitrd/dtb 出厂即对）`wl 0x8000` |
+            | 03_rootfs.img | rootfs 分区（首启自动扩容）`wl 0xC8000` |
+            | p3_armbian_slim.img.gz | U 盘整盘镜像（Rufus/Etcher 写入） |
+            | p3boot | U 盘 / eMMC 启动切换脚本 |
+            - SHA256SUMS.txt 覆盖以上全部文件
+            - 刷机命令见仓库 `firmware/README.md`
