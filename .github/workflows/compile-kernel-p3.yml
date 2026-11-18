@@ -80,7 +80,7 @@ on:
       kernel_config:
         description: "Set the path of kernel .config directory (in this repo)"
         required: false
-        default: "p3/kernel-config/rk35xx"
+        default: "kernel-config/rk35xx"
       kernel_sign:
         description: "Set the kernel custom signature"
         required: false
@@ -213,7 +213,7 @@ jobs:
           kernel_sign: ${{ inputs.kernel_sign }}
           kernel_config: ${{ inputs.kernel_config }}
           kernel_toolchain: ${{ inputs.kernel_toolchain }}
-          kernel_patch: p3/kernel-patches
+          kernel_patch: kernel-patches
           auto_patch: true
           ccache_clear: ${{ inputs.ccache_clear }}
           docker_hostpath: /builder

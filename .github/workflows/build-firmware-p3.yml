@@ -114,14 +114,14 @@ jobs:
           set -e
           OUT=build/output; mkdir -p ${OUT}
           cp build/base/02_boot.img build/base/03_rootfs.img ${OUT}/
-          cp p3/flashkit/01_gpt_bootarea_l10h.img p3/flashkit/01_gpt_bootarea_l10g.img p3/flashkit/p3boot ${OUT}/
+          cp flashkit/01_gpt_bootarea_l10h.img flashkit/01_gpt_bootarea_l10g.img flashkit/p3boot ${OUT}/
 
           # ---- slim：flashkit 布局整盘镜像（01 引导区 + boot@32768 + rootfs@819200）----
           BOOT_START=32768; ROOT_START=819200; BOOT_SECS=786432
           ROOT_SECS=$(stat -c%s ${OUT}/03_rootfs.img | awk '{printf "%d", $1/512 + ($1%512?1:0)}')
           SLIM_SECS=$((ROOT_START + ROOT_SECS + 33))
           truncate -s $((SLIM_SECS * 512)) ${OUT}/slim.raw
-          dd if=p3/flashkit/01_gpt_bootarea_l10h.img of=${OUT}/slim.raw conv=notrunc status=none
+          dd if=flashkit/01_gpt_bootarea_l10h.img of=${OUT}/slim.raw conv=notrunc status=none
           dd if=${OUT}/02_boot.img  of=${OUT}/slim.raw bs=512 seek=${BOOT_START} conv=notrunc status=none
           dd if=${OUT}/03_rootfs.img of=${OUT}/slim.raw bs=512 seek=${ROOT_START} conv=notrunc status=none
           cd ${OUT}

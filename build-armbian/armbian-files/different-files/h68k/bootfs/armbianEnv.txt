@@ -1,8 +1,0 @@
-verbosity=1
-bootlogo=true
-console=both
-extraargs=cma=256M
-overlay_prefix=rk35xx
-fdtfile=rockchip/rk3568-hlink-h68k.dtb
-rootdev=/dev/mmcblk0p2
-rootfstype=ext4

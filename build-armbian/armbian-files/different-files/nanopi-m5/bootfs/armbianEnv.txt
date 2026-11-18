@@ -1,8 +1,0 @@
-verbosity=7
-bootlogo=false
-console=both
-overlay_prefix=
-overlays=
-fdtfile=rockchip/rk3576-nanopi-m5.dtb
-rootdev=/dev/mmcblk0p2
-rootfstype=ext4
